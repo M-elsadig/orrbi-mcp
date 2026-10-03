@@ -1,0 +1,28 @@
+{
+  "name": "orrbi-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remote MCP server that lets AI assistants book services at local businesses in Qatar via Orrbi.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/dev.ts",
+    "start": "tsx --env-file=.env src/dev.ts",
+    "build": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "create-system-user": "tsx --env-file=.env scripts/create-system-user.ts",
+    "inspector": "npx @modelcontextprotocol/inspector"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
