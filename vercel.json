@@ -4,6 +4,7 @@
     { "src": "api/mcp.ts", "use": "@vercel/node" }
   ],
   "routes": [
-    { "src": "/mcp", "dest": "/api/mcp" }
+    { "src": "/mcp/?", "dest": "/api/mcp.ts" },
+    { "src": "/api/mcp/?", "dest": "/api/mcp.ts" }
   ]
 }
