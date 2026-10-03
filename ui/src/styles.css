@@ -1,0 +1,255 @@
+/* Host tokens first (Claude and ChatGPT inject them at runtime); these are
+   only fallbacks for hosts that send none. light-dark() follows the
+   color-scheme the host sets through applyDocumentTheme. */
+:root {
+  color-scheme: light dark;
+  --color-background-primary: light-dark(#ffffff, #30302e);
+  --color-background-secondary: light-dark(#f5f4ed, #262624);
+  --color-background-tertiary: light-dark(#faf9f5, #141413);
+  --color-background-inverse: light-dark(#141413, #faf9f5);
+  --color-background-warning: light-dark(#f6eedf, #483a0f);
+  --color-background-danger: light-dark(#f7ecec, #602a28);
+  --color-text-primary: light-dark(#141413, #faf9f5);
+  --color-text-secondary: light-dark(#3d3d3a, #c2c0b6);
+  --color-text-tertiary: light-dark(#73726c, #9c9a92);
+  --color-text-inverse: light-dark(#ffffff, #141413);
+  --color-text-warning: light-dark(#5a4815, #d1a041);
+  --color-text-danger: light-dark(#7f2c28, #ee8884);
+  --color-border-primary: light-dark(rgb(31 30 29 / 0.4), rgb(222 220 209 / 0.4));
+  --color-border-secondary: light-dark(rgb(31 30 29 / 0.3), rgb(222 220 209 / 0.3));
+  --color-border-tertiary: light-dark(rgb(31 30 29 / 0.15), rgb(222 220 209 / 0.15));
+  --color-border-danger: light-dark(#a73d39, #cd5c58);
+  --color-ring-primary: light-dark(rgb(20 20 19 / 0.7), rgb(250 249 245 / 0.7));
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-text-xs-size: 12px;
+  --font-text-sm-size: 14px;
+  --font-text-md-size: 16px;
+  --font-heading-md-size: 16px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --border-radius-sm: 6px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 10px;
+  --border-radius-xl: 12px;
+  --border-radius-full: 9999px;
+  --border-width-regular: 0.5px;
+
+  --safe-top: 0px;
+  --safe-right: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
+  --gap: 12px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: transparent;   /* the host's surface shows through */
+}
+
+body {
+  color: var(--color-text-primary);
+  /* host font first; Arabic falls through to a system font that has the glyphs */
+  font-family: var(--font-sans), "Noto Sans Arabic", "Geeza Pro", "Segoe UI", Tahoma, sans-serif;
+  font-size: var(--font-text-sm-size);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+
+#root {
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  display: grid;
+  gap: 8px;
+}
+
+h3, p, ul, dl, dd { margin: 0; }
+
+/* ── Shared ─────────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--color-background-primary);
+  border: var(--border-width-regular) solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-xl);
+  overflow: hidden;
+}
+.pad { padding: 16px; display: grid; gap: 12px; }
+
+.title {
+  font-size: var(--font-heading-md-size);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.meta { color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.caption { color: var(--color-text-tertiary); font-size: var(--font-text-xs-size); }
+.head { display: grid; gap: 4px; }
+.foot { padding-block-start: 2px; }
+
+/* ── Business cards: a carousel that swipes horizontally ────────────────── */
+
+.carousel {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: min(280px, 84%);   /* the next card peeks in to show it scrolls */
+  gap: var(--gap);
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline mandatory;
+  scroll-padding-inline: var(--safe-left) var(--safe-right);
+  padding-block-end: 4px;
+  scrollbar-width: none;
+}
+.carousel::-webkit-scrollbar { display: none; }
+.carousel.single { grid-auto-columns: 100%; }
+.carousel > * { scroll-snap-align: start; }
+
+.business { display: grid; grid-template-rows: auto 1fr; }
+.business .body { padding: 12px 14px 14px; display: grid; gap: 4px; align-content: start; }
+
+.photo {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  display: block;
+  background: var(--color-background-secondary);
+}
+.placeholder {
+  display: grid;
+  place-items: center;
+  --tint: hsl(var(--hue, 30) 55% 50%);
+  background: color-mix(in oklab, var(--tint) 18%, var(--color-background-secondary));
+}
+.placeholder span {
+  font-size: 40px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1;
+  color: color-mix(in oklab, var(--tint) 55%, var(--color-text-primary));
+}
+
+.services {
+  list-style: none;
+  padding: 0;
+  margin-block-start: 8px;
+  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.services li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding-block: 8px;
+  border-block-end: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.services li:last-child { border-block-end: 0; padding-block-end: 0; }
+.svc-name { min-width: 0; overflow-wrap: anywhere; }
+.svc-meta {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.services .more { color: var(--color-text-tertiary); font-size: var(--font-text-xs-size); }
+
+/* ── Time buttons ───────────────────────────────────────────────────────── */
+
+.slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(132px, 100%), 1fr));
+  gap: 8px;
+}
+.slot {
+  min-height: 48px;                    /* above the 44pt touch minimum */
+  padding: 6px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  column-gap: 6px;
+  font: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+  border-radius: var(--border-radius-lg);
+  font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button.slot { cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease; }
+button.slot:hover:not(:disabled) { border-color: var(--color-border-primary); }
+button.slot:active:not(:disabled) { transform: scale(0.97); }
+button.slot:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
+button.slot:disabled:not(.chosen) { opacity: 0.45; cursor: default; }
+.slot .time { font-weight: var(--font-weight-semibold); }
+.slot .left { color: var(--color-text-tertiary); font-size: var(--font-text-xs-size); }
+.slot .left.low { color: var(--color-text-warning); }
+.slot.chosen {
+  background: var(--color-background-inverse);
+  border-color: var(--color-background-inverse);
+  color: var(--color-text-inverse);
+}
+.slot.chosen .left { color: inherit; opacity: 0.75; }
+.empty { color: var(--color-text-secondary); }
+
+/* ── Booking confirmation ───────────────────────────────────────────────── */
+
+.badge {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--border-radius-full);
+  font-size: var(--font-text-xs-size);
+  font-weight: var(--font-weight-semibold);
+}
+.badge.pending { background: var(--color-background-warning); color: var(--color-text-warning); }
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+.rows { display: grid; }
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-block: 10px;
+  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.row dt { color: var(--color-text-secondary); flex-shrink: 0; }
+.row dd { text-align: end; overflow-wrap: anywhere; font-weight: var(--font-weight-medium); }
+.row dd.ref {
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  direction: ltr;                      /* ATO-KX4CTS reads left to right in Arabic too */
+  unicode-bidi: isolate;
+}
+
+/* ── Notices ────────────────────────────────────────────────────────────── */
+
+.notice { padding: 14px 16px; color: var(--color-text-secondary); }
+.notice.error { display: grid; gap: 4px; border-color: var(--color-border-danger); background: var(--color-background-danger); }
+.notice.error .title { color: var(--color-text-danger); font-size: var(--font-text-sm-size); }
+.notice.error .meta { color: var(--color-text-primary); }
+
+/* ── Skeletons ──────────────────────────────────────────────────────────── */
+
+.sk {
+  background: var(--color-background-secondary);
+  border-radius: var(--border-radius-sm);
+  height: 12px;
+  animation: sk-pulse 1.4s ease-in-out infinite;
+}
+.sk.tall { height: 18px; }
+.sk.w30 { width: 30%; } .sk.w40 { width: 40%; } .sk.w50 { width: 50%; }
+.sk.w60 { width: 60%; } .sk.w70 { width: 70%; } .sk.w80 { width: 80%; }
+.photo.sk { height: auto; border-radius: 0; }
+.slot.sk { border-color: transparent; }
+
+@keyframes sk-pulse { 50% { opacity: 0.5; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk { animation: none; }
+  button.slot { transition: none; }
+}

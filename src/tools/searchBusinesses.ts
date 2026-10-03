@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { cleanText, guard, ok } from '../lib/results.js';
+import { coverImage } from '../lib/images.js';
+import { WIDGET_URI } from '../widget.js';
 
 const serviceOut = z.object({
   service_id: z.string(),
   name: z.string(),
+  name_ar: z.string().nullable().optional(),
   duration_min: z.number(),
   price_qar: z.number()
 });
@@ -13,23 +17,28 @@ const serviceOut = z.object({
 const businessOut = z.object({
   business_id: z.string(),
   name: z.string(),
+  name_ar: z.string().nullable().optional(),
   category: z.string(),
   area: z.string(),
   address: z.string(),
+  image_url: z.string().nullable().optional(),
   services: z.array(serviceOut)
 });
 
 type Row = {
   id: string;
   name_en: string;
+  name_ar: string | null;
   category: string;
   area: string;
   address: string | null;
-  services: { id: string; name_en: string; duration_min: number; price: number | string }[] | null;
+  images: string[] | null;
+  services: { id: string; name_en: string; name_ar: string | null; duration_min: number; price: number | string }[] | null;
 };
 
 export function registerSearchBusinesses(server: McpServer) {
-  server.registerTool(
+  registerAppTool(
+    server,
     'search_businesses',
     {
       title: 'Search businesses',
@@ -60,12 +69,13 @@ export function registerSearchBusinesses(server: McpServer) {
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false
-      }
+      },
+      _meta: { ui: { resourceUri: WIDGET_URI } }
     },
     async ({ category, area, query, limit }) => guard('search_businesses', async () => {
       let q = db()
         .from('businesses')
-        .select('id,name_en,category,area,address,services(id,name_en,duration_min,price)')
+        .select('id,name_en,name_ar,category,area,address,images,services(id,name_en,name_ar,duration_min,price)')
         .eq('is_active', true)
         .eq('services.is_active', true)
         .order('name_en', { ascending: true })
@@ -82,7 +92,8 @@ export function registerSearchBusinesses(server: McpServer) {
       const { data, error } = await q;
       if (error) throw error;
 
-      const businesses = ((data ?? []) as Row[]).map((b) => ({
+      const rows = (data ?? []) as Row[];
+      const businesses = rows.map((b) => ({
         business_id: b.id,
         name: b.name_en,
         category: b.category,
@@ -96,13 +107,23 @@ export function registerSearchBusinesses(server: McpServer) {
         }))
       }));
 
-      return ok({
-        businesses,
-        count: businesses.length,
-        ...(businesses.length ? {} : {
-          note: 'No businesses matched. Tell the user, and offer to search again with fewer filters (for example without the area or category).'
-        })
-      });
+      const note = businesses.length ? {} : {
+        note: 'No businesses matched. Tell the user, and offer to search again with fewer filters (for example without the area or category).'
+      };
+
+      /* the UI also gets Arabic names and the cover photo; the model's text
+         answer stays exactly as before */
+      const forUi = businesses.map((b, i) => ({
+        ...b,
+        name_ar: rows[i].name_ar || null,
+        image_url: coverImage(rows[i].images),
+        services: b.services.map((s, j) => ({ ...s, name_ar: rows[i].services?.[j]?.name_ar || null }))
+      }));
+
+      return ok(
+        { businesses: forUi, count: businesses.length, ...note },
+        { businesses, count: businesses.length, ...note }
+      );
     })
   );
 }

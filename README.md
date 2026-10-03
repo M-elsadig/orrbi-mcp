@@ -2,7 +2,8 @@
 
 A remote [MCP](https://modelcontextprotocol.io) server that lets AI assistants (Claude, ChatGPT) find local businesses in Qatar, check open times and request bookings. It uses the **same Supabase database as the Orrbi app**.
 
-- One endpoint: `POST /mcp` (Streamable HTTP, stateless, JSON responses)
+- Connector URLs: `POST /mcp` for Claude, `POST /chatgpt/mcp` for ChatGPT (same server; see [Inline UI](#inline-ui-mcp-apps))
+- Streamable HTTP, stateless, JSON responses
 - Times in Asia/Qatar (UTC+3), prices in QAR
 - No authentication in v1
 
@@ -26,6 +27,37 @@ After spaces and dashes are stripped, `create_booking` accepts:
 - `0097455123456`
 
 Each is normalised to `+974XXXXXXXX`, the only form stored (a DB CHECK enforces it) and sent to n8n. Anything else is rejected with a message telling the user what format to use.
+
+## Inline UI (MCP Apps)
+
+In hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (Claude, ChatGPT), each tool result also renders as an inline widget. The UI is extra: text-only clients get exactly the same text answers as before.
+
+| Tool | Widget |
+|---|---|
+| `search_businesses` | Swipeable cards: photo (or a coloured initial), name, category · area, services with QAR price and duration |
+| `get_availability` | The day's times as buttons, e.g. `6:00 PM · 5 left`. Tapping one sends a chat message ("I want the 6:00 PM slot on Mon 5 Oct for CrossFit class at Falcon Gym."), so the model carries on as usual and still confirms name and phone before booking |
+| `create_booking` | Confirmation card: **Pending** badge, business, service, Qatar date and time, reference. Never the phone |
+
+- **Languages:** follows the host's locale. Arabic switches the widget to right-to-left and uses `name_ar` for businesses and services; everything else is English. Times are always Qatar time.
+- **Theme:** uses the host's colour and font variables, so light and dark follow the host.
+- **Mobile first:** works from 320px wide, 44px+ tap targets, respects safe-area insets, no nested vertical scrolling.
+- **Photos:** the first entry of `businesses.images` (the app's cover photo), only if it is a public Supabase Storage URL on `IMAGE_HOST`. The widget's CSP allows that one host and nothing else, and the widget makes no network calls. To add a photo, upload it to a public bucket and put its public URL first in `images`.
+
+### Why two connector URLs
+Claude and ChatGPT both read the widget's `_meta.ui.domain` but expect different values, and a stateless server can't tell them apart:
+
+| URL | Host | `ui.domain` |
+|---|---|---|
+| `https://orrbi-mcp.vercel.app/mcp` | Claude | `{sha256(connector URL)[0:32]}.claudemcpcontent.com` = `57dfa9b336b6975c016639ad34cf2764.claudemcpcontent.com` |
+| `https://orrbi-mcp.vercel.app/chatgpt/mcp` | ChatGPT | `https://orrbi-mcp.vercel.app` |
+
+Claude hashes the exact URL configured in Connectors (a trailing slash changes it). If you use a different URL, set `MCP_PUBLIC_URL` to it.
+
+### Building the widget
+`ui/` holds a small TypeScript app (no framework) bundled by Vite into one self-contained file, `ui/dist/widget.html`. It uses `@modelcontextprotocol/ext-apps` **1.7.5**, the last release that works with `@modelcontextprotocol/sdk` 1.x (2.x needs the v2 SDK packages).
+
+- `npm run build:ui` builds it; `npm run dev`/`npm start` build it first.
+- On Vercel, the `vercel-build` script builds it and `vercel.json` ships it with the function (`includeFiles`).
 
 ## How it fits the existing database
 
@@ -165,7 +197,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<project>.vercel.app/mcp -H "Or
 2. Name it **Orrbi**, set the URL to `https://<project>.vercel.app/mcp`, and leave OAuth empty (v1 has no auth).
 3. In a chat, enable Orrbi from the tools menu and try: *"Find a gym in Al Sadd and book me a day pass tomorrow evening."* Claude should search, show times, read back the details, and only book after you confirm.
 
-**ChatGPT:** turn on Developer mode (Settings → Apps & Connectors → Advanced), then create a connector with the same URL and no authentication.
+**ChatGPT:** turn on Developer mode (Settings → Apps & Connectors → Advanced), then create a connector with **`https://orrbi-mcp.vercel.app/chatgpt/mcp`** (not `/mcp`, so the widget gets the domain ChatGPT expects) and no authentication.
 
 ## Known v1 limits
 

@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { fail, guard, ok } from '../lib/results.js';
+import { WIDGET_URI } from '../widget.js';
 import { TZ_LABEL, isRealDate, qatarDayRange, qatarLabel, todayInQatar, toQatarIso } from '../lib/time.js';
 
 const slotOut = z.object({
@@ -13,7 +15,8 @@ const slotOut = z.object({
 });
 
 export function registerGetAvailability(server: McpServer) {
-  server.registerTool(
+  registerAppTool(
+    server,
     'get_availability',
     {
       title: 'Get available times',
@@ -32,7 +35,9 @@ export function registerGetAvailability(server: McpServer) {
       },
       outputSchema: {
         business_name: z.string(),
+        business_name_ar: z.string().nullable().optional(),
         service_name: z.string(),
+        service_name_ar: z.string().nullable().optional(),
         date: z.string(),
         timezone: z.string(),
         slots: z.array(slotOut),
@@ -44,7 +49,8 @@ export function registerGetAvailability(server: McpServer) {
         destructiveHint: false,
         idempotentHint: true,
         openWorldHint: false
-      }
+      },
+      _meta: { ui: { resourceUri: WIDGET_URI } }
     },
     async ({ business_id, service_id, date }) => guard('get_availability', async () => {
       if (!isRealDate(date)) return fail(`${date} is not a real calendar date. Please use YYYY-MM-DD.`);
@@ -53,8 +59,8 @@ export function registerGetAvailability(server: McpServer) {
       if (date < today) return fail(`${date} is in the past. Today in Qatar is ${today}; please pick today or a later date.`);
 
       const [biz, svc] = await Promise.all([
-        db().from('businesses').select('id,name_en').eq('id', business_id).eq('is_active', true).maybeSingle(),
-        db().from('services').select('id,name_en,duration_min,business_id')
+        db().from('businesses').select('id,name_en,name_ar').eq('id', business_id).eq('is_active', true).maybeSingle(),
+        db().from('services').select('id,name_en,name_ar,duration_min,business_id')
           .eq('id', service_id).eq('is_active', true).maybeSingle()
       ]);
       if (biz.error) throw biz.error;
@@ -92,7 +98,7 @@ export function registerGetAvailability(server: McpServer) {
           };
         });
 
-      return ok({
+      const answer = {
         business_name: biz.data.name_en,
         service_name: svc.data.name_en,
         date,
@@ -101,7 +107,14 @@ export function registerGetAvailability(server: McpServer) {
         ...(slots.length ? {} : {
           note: `No open times for ${svc.data.name_en} at ${biz.data.name_en} on ${date}. Offer to check another date.`
         })
-      });
+      };
+
+      /* Arabic names for the UI only; the text answer is unchanged */
+      return ok({
+        ...answer,
+        business_name_ar: biz.data.name_ar || null,
+        service_name_ar: svc.data.name_ar || null
+      }, answer);
     })
   );
 }

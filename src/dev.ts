@@ -8,7 +8,7 @@ const port = Number(process.env.PORT ?? 3000);
 createServer((req, res) => {
   const path = (req.url ?? '/').split('?')[0];
 
-  if (path === '/mcp') {
+  if (path === '/mcp' || path === '/chatgpt/mcp') {
     void handleMcp(req, res);
     return;
   }

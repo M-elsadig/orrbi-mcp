@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { buildServer } from './server.js';
 import { isOriginAllowed } from './lib/origin.js';
+import { uiProfile, type UiHost } from './widget.js';
 
 /* The one /mcp handler, shared by the Vercel function and the local dev
    server. Stateless Streamable HTTP: POST only, JSON responses, no sessions. */
@@ -22,6 +23,24 @@ function cors(origin: string | undefined): Record<string, string> {
     'Access-Control-Expose-Headers': 'Mcp-Session-Id',
     Vary: 'Origin'
   };
+}
+
+/* Which host this connector URL is for. /chatgpt/mcp is ChatGPT's URL; on
+   Vercel the route also tags it with ?ui=chatgpt, in case the function sees
+   the rewritten path rather than the original one. Everything else is Claude. */
+function hostFor(req: IncomingMessage): UiHost {
+  const url = new URL(req.url ?? '/', 'http://local');
+  return url.pathname.startsWith('/chatgpt') || url.searchParams.get('ui') === 'chatgpt' ? 'chatgpt' : 'claude';
+}
+
+const first = (h: string | string[] | undefined) => (Array.isArray(h) ? h[0] : h)?.split(',')[0]?.trim();
+
+/* The public origin the request arrived on, e.g. https://orrbi-mcp.vercel.app */
+function publicOrigin(req: IncomingMessage): string {
+  const host = first(req.headers['x-forwarded-host']) || first(req.headers.host) || 'localhost';
+  const local = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host);
+  const proto = first(req.headers['x-forwarded-proto']) || (local ? 'http' : 'https');
+  return `${proto}://${host}`;
 }
 
 export async function handleMcp(req: IncomingMessage, res: ServerResponse, parsedBody?: unknown): Promise<void> {
@@ -46,7 +65,7 @@ export async function handleMcp(req: IncomingMessage, res: ServerResponse, parse
 
   for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v);
 
-  const server = buildServer();
+  const server = buildServer(uiProfile(hostFor(req), publicOrigin(req)));
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true

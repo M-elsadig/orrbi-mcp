@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { GENERIC_ERROR, fail, guard, ok } from '../lib/results.js';
 import { PHONE_MESSAGE, normalizeQatarPhone } from '../lib/phone.js';
 import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
 import { notifyTelegram } from '../lib/telegram.js';
+import { WIDGET_URI } from '../widget.js';
 
 /* create_guest_booking raises these by name (0004_mcp_guest_bookings.sql).
    Each becomes a sentence the model can pass straight to the user. None of
@@ -40,7 +42,8 @@ type Booked = {
 };
 
 export function registerCreateBooking(server: McpServer) {
-  server.registerTool(
+  registerAppTool(
+    server,
     'create_booking',
     {
       title: 'Request a booking',
@@ -76,7 +79,9 @@ export function registerCreateBooking(server: McpServer) {
         reference: z.string(),
         status: z.string(),
         business_name: z.string(),
+        business_name_ar: z.string().nullable().optional(),
         service_name: z.string(),
+        service_name_ar: z.string().nullable().optional(),
         start: z.string(),
         start_label: z.string(),
         message: z.string()
@@ -87,7 +92,8 @@ export function registerCreateBooking(server: McpServer) {
         destructiveHint: false,
         idempotentHint: false,
         openWorldHint: true
-      }
+      },
+      _meta: { ui: { resourceUri: WIDGET_URI } }
     },
     async (args) => guard('create_booking', async () => {
       const phone = normalizeQatarPhone(args.customer_phone);
@@ -135,9 +141,11 @@ export function registerCreateBooking(server: McpServer) {
       const startLabel = qatarLabel(row.starts_at);
 
       /* a retried request_id already notified everyone the first time.
-         Both run side by side, each capped at 3s, and neither can throw. */
-      if (!row.deduped) {
-        await Promise.all([
+         Notifications and the Arabic-name lookup run side by side, each
+         capped, and none of them can throw. */
+      const [ar] = await Promise.all([
+        arabicNames(args.business_id, args.service_id),
+        row.deduped ? null : Promise.all([
           notifyBookingCreated({
             event: 'booking.created',
             source: 'mcp',
@@ -165,10 +173,10 @@ export function registerCreateBooking(server: McpServer) {
             customer_phone: phone,
             notes: args.notes || null
           })
-        ]);
-      }
+        ])
+      ]);
 
-      return ok({
+      const answer = {
         booking_id: row.booking_id,
         reference: row.reference,
         status: row.status,
@@ -179,7 +187,25 @@ export function registerCreateBooking(server: McpServer) {
         message:
           `Your booking request for ${row.service_name} at ${row.business_name} on ${startLabel} (Qatar time) has been sent ` +
           `and is pending. You'll get a WhatsApp confirmation once ${row.business_name} confirms it. Reference: ${row.reference}.`
-      });
+      };
+
+      /* Arabic names for the UI only; the text answer is unchanged, and the
+         phone is in neither */
+      return ok({ ...answer, business_name_ar: ar.business, service_name_ar: ar.service }, answer);
     })
   );
+}
+
+/* Best effort: the booking is already made, so a failed lookup just means
+   the Arabic UI shows the English names. */
+async function arabicNames(businessId: string, serviceId: string): Promise<{ business: string | null; service: string | null }> {
+  try {
+    const [b, s] = await Promise.all([
+      db().from('businesses').select('name_ar').eq('id', businessId).maybeSingle(),
+      db().from('services').select('name_ar').eq('id', serviceId).maybeSingle()
+    ]);
+    return { business: b.data?.name_ar || null, service: s.data?.name_ar || null };
+  } catch {
+    return { business: null, service: null };
+  }
 }

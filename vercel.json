@@ -1,10 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "builds": [
-    { "src": "api/mcp.ts", "use": "@vercel/node" }
+    {
+      "src": "api/mcp.ts",
+      "use": "@vercel/node",
+      "config": { "includeFiles": ["ui/dist/**"] }
+    }
   ],
   "routes": [
     { "src": "/mcp/?", "dest": "/api/mcp.ts" },
-    { "src": "/api/mcp/?", "dest": "/api/mcp.ts" }
+    { "src": "/api/mcp/?", "dest": "/api/mcp.ts" },
+    { "src": "/chatgpt/mcp/?", "dest": "/api/mcp.ts?ui=chatgpt" }
   ]
 }

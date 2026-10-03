@@ -1,11 +1,15 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 /* Every tool answers with the same object twice: structuredContent for
-   clients that read the output schema, and a JSON text block for those that
-   don't. */
-export function ok(data: Record<string, unknown>): CallToolResult {
+   clients that read the output schema (and for the UI), and a JSON text block
+   for those that don't.
+
+   `text` lets a tool keep its text answer exactly as it was while the
+   structured copy carries a few extra fields only the UI needs (Arabic
+   names, the cover photo). */
+export function ok(data: Record<string, unknown>, text: Record<string, unknown> = data): CallToolResult {
   return {
-    content: [{ type: 'text', text: JSON.stringify(data) }],
+    content: [{ type: 'text', text: JSON.stringify(text) }],
     structuredContent: data
   };
 }
