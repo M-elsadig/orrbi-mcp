@@ -5,6 +5,7 @@ import { GENERIC_ERROR, fail, guard, ok } from '../lib/results.js';
 import { PHONE_MESSAGE, normalizeQatarPhone } from '../lib/phone.js';
 import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
+import { notifyTelegram } from '../lib/telegram.js';
 
 /* create_guest_booking raises these by name (0004_mcp_guest_bookings.sql).
    Each becomes a sentence the model can pass straight to the user. None of
@@ -133,25 +134,37 @@ export function registerCreateBooking(server: McpServer) {
       const start = toQatarIso(row.starts_at);
       const startLabel = qatarLabel(row.starts_at);
 
-      /* a retried request_id already notified n8n the first time */
+      /* a retried request_id already notified everyone the first time.
+         Both run side by side, each capped at 3s, and neither can throw. */
       if (!row.deduped) {
-        await notifyBookingCreated({
-          event: 'booking.created',
-          source: 'mcp',
-          booking_id: row.booking_id,
-          reference: row.reference,
-          status: row.status,
-          business_id: args.business_id,
-          business_name: row.business_name,
-          service_id: args.service_id,
-          service_name: row.service_name,
-          slot_id: args.slot_id,
-          start,
-          start_label: startLabel,
-          customer_name: args.customer_name,
-          customer_phone: phone,
-          notes: args.notes || null
-        });
+        await Promise.all([
+          notifyBookingCreated({
+            event: 'booking.created',
+            source: 'mcp',
+            booking_id: row.booking_id,
+            reference: row.reference,
+            status: row.status,
+            business_id: args.business_id,
+            business_name: row.business_name,
+            service_id: args.service_id,
+            service_name: row.service_name,
+            slot_id: args.slot_id,
+            start,
+            start_label: startLabel,
+            customer_name: args.customer_name,
+            customer_phone: phone,
+            notes: args.notes || null
+          }),
+          notifyTelegram({
+            reference: row.reference,
+            business_name: row.business_name,
+            service_name: row.service_name,
+            start_label: startLabel,
+            customer_name: args.customer_name,
+            customer_phone: phone,
+            notes: args.notes || null
+          })
+        ]);
       }
 
       return ok({

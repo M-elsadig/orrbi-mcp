@@ -61,6 +61,7 @@ cp .env.example .env     # then fill in the values below
 | `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase → Settings → API. Server-side only, never commit it. |
 | `ORRBI_MCP_USER_ID` | yes | From `npm run create-system-user` (below) |
 | `N8N_WEBHOOK_URL` | no | Receives each new booking. Failures are logged and never fail the booking. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | no | Sends you a Telegram message for every new (non-retried) booking: reference, business, service, Qatar time, customer name and phone. 3s timeout; failures are logged and never fail the booking. |
 | `ALLOWED_ORIGINS` | no | Comma-separated browser origins. Default: claude.ai, claude.com, chatgpt.com, chat.openai.com, and the Inspector on localhost:6274. Requests with **no** Origin header (server-to-server connectors) are always allowed; a disallowed Origin gets 403. |
 
 ### 1. Migration
