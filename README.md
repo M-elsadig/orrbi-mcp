@@ -146,7 +146,7 @@ vercel env add ORRBI_MCP_USER_ID production
 vercel env add N8N_WEBHOOK_URL production      # optional
 vercel --prod
 ```
-Your server is at **`https://<project>.vercel.app/mcp`**. `vercel.json` rewrites `/mcp` to the function in `api/mcp.ts`.
+Your server is at **`https://<project>.vercel.app/mcp`**. `vercel.json` declares `api/mcp.ts` as the only function (an explicit `@vercel/node` build, so Vercel's zero-config detection doesn't treat `src/` files as entrypoints) and routes `/mcp` to it. Vercel will log that Project Settings build options don't apply; that is expected.
 
 Smoke test:
 ```bash
