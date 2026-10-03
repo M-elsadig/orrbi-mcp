@@ -42,7 +42,35 @@ const STRINGS = {
     reference: 'Reference',
     errorTitle: 'Something went wrong',
     slotMessage: (time: string, day: string, service: string, business: string) =>
-      `I want the ${time} slot on ${day} for ${service} at ${business}.`
+      `I want the ${time} slot on ${day} for ${service} at ${business}.`,
+    /* booking inside the card */
+    back: 'Back',
+    business: 'Place',
+    price: 'Price',
+    duration: 'Duration',
+    pickService: 'Choose a service',
+    yourDetails: 'Your details',
+    name: 'Name',
+    mobile: 'Qatar mobile',
+    mobileHint: 'e.g. 5512 3456',
+    nameRequired: 'Enter your name.',
+    nameTooLong: 'Use 100 characters or fewer.',
+    phoneInvalid: '8 digits, optionally starting with +974 or 00974.',
+    confirm: 'Confirm booking',
+    booking: 'Booking…',
+    privacy: 'Your name and number go only to the business, not into this chat.',
+    loadFailed: 'Couldn’t load the times.',
+    tryAgain: 'Try again',
+    continueInChat: 'Or continue in the chat.',
+    pickAnother: 'Pick another time',
+    bookErrors: {
+      slotGone: 'That time was just taken or is no longer available.',
+      duplicate: 'This number already has a booking at this time.',
+      tooMany: 'This number already has 3 bookings waiting for confirmation.',
+      phone: 'Check the mobile number: 8 digits, optionally starting with +974.',
+      other: 'Couldn’t complete the booking. Please try again.'
+    },
+    booked: 'Booking requested'
   },
   ar: {
     placesFound: (n: number) => (n === 1 ? 'مكان واحد' : n === 2 ? 'مكانان' : `${n} أماكن`),
@@ -66,7 +94,35 @@ const STRINGS = {
     reference: 'رقم الحجز',
     errorTitle: 'حدث خطأ',
     slotMessage: (time: string, day: string, service: string, business: string) =>
-      `أريد موعد ${time} يوم ${day} لـ ${service} في ${business}.`
+      `أريد موعد ${time} يوم ${day} لـ ${service} في ${business}.`,
+    back: 'رجوع',
+    business: 'المكان',
+    price: 'السعر',
+    duration: 'المدة',
+    pickService: 'اختر الخدمة',
+    yourDetails: 'بياناتك',
+    name: 'الاسم',
+    mobile: 'رقم الجوال في قطر',
+    /* digits only: the mobile field is left-to-right, and an Arabic word in it would scramble */
+    mobileHint: '5512 3456',
+    nameRequired: 'أدخل اسمك.',
+    nameTooLong: 'استخدم 100 حرف أو أقل.',
+    phoneInvalid: '8 أرقام، ويمكن أن يبدأ بـ ‎+974 أو ‎00974.',
+    confirm: 'تأكيد الحجز',
+    booking: 'جارٍ الحجز…',
+    privacy: 'يصل اسمك ورقمك إلى المكان فقط، ولا يُرسلان إلى هذه المحادثة.',
+    loadFailed: 'تعذّر تحميل المواعيد.',
+    tryAgain: 'حاول مرة أخرى',
+    continueInChat: 'أو أكمل في المحادثة.',
+    pickAnother: 'اختر موعداً آخر',
+    bookErrors: {
+      slotGone: 'هذا الموعد حُجز للتو أو لم يعد متاحاً.',
+      duplicate: 'لدى هذا الرقم حجز في هذا الموعد بالفعل.',
+      tooMany: 'لدى هذا الرقم 3 حجوزات بانتظار التأكيد.',
+      phone: 'تحقق من رقم الجوال: 8 أرقام، ويمكن أن يبدأ بـ ‎+974.',
+      other: 'تعذّر إتمام الحجز. حاول مرة أخرى.'
+    },
+    booked: 'تم طلب الحجز'
   }
 } as const;
 

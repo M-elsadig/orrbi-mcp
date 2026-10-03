@@ -56,7 +56,8 @@ export function registerCreateBooking(server: McpServer) {
         'the customer\'s name, and their Qatar mobile number. Never call it on a guess or without that confirmation. ' +
         'Use business_id/service_id from search_businesses and slot_id from get_availability; never invent ids. ' +
         'Generate a request_id (e.g. a UUID) for each new booking and send the same request_id if you retry, so the booking is not made twice. ' +
-        'If the slot is full, call get_availability again and offer other times.',
+        'If the slot is full, call get_availability again and offer other times. ' +
+        'If the card already reported a booking through model context, it is done: do not call this again for it.',
       inputSchema: {
         business_id: z.uuid('business_id must be the id returned by search_businesses')
           .describe('business_id from search_businesses.'),

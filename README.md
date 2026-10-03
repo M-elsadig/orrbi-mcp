@@ -38,6 +38,19 @@ In hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-app
 | `get_availability` | One booking card for the next 7 days: a day strip (empty days greyed) and that day's times grouped under Morning / Afternoon / Evening ("2 left" only when 2 or fewer remain). All 7 days come with the first result, so switching days is instant. If the requested day is empty, it opens on the next day with times and says so. Tapping a time tells the model its `slot_id` (`updateModelContext`) and sends a chat message ("I want the 7:00 PM slot on Thu 8 Oct for CrossFit class at Falcon Gym."); the model still confirms name and phone before booking |
 | `create_booking` | Confirmation card: **Pending** badge, business, service, Qatar date and time, reference. Never the phone |
 
+### Booking inside the card
+
+When the host lets the widget call tools (`serverTools` capability; Claude and ChatGPT do), the whole flow happens in one card by taps, with a back arrow on each step:
+
+**Places → Services → Times → Your details → Booked**
+
+- **Services:** tapping a place shows its services (duration, price).
+- **Times:** tapping a service loads the 7-day card with `app.callServerTool('get_availability')`.
+- **Your details:** tapping a time shows a summary (place, service, Qatar date and time, price) and Name + Qatar mobile fields, checked with the server's own phone rules (`src/lib/phone.ts`). **Confirm booking** calls `create_booking` from the card with a `request_id` made in the card and reused on retries, so a double tap or retry can't book twice. Errors (time just taken, already booked, too many pending, bad number) show in the form; a taken time offers "Pick another time".
+- **Booked:** the Pending confirmation with the reference. Then `app.updateModelContext` tells the model only what was booked (place, service, time, reference): **never the name or phone**, which go only to the server as `create_booking` arguments and are never sent as chat text.
+
+A card the model opened with `get_availability` starts at Times (no back). If the host can't forward tool calls from the widget, the card falls back to the chat flow: tapping a time sends a chat message and the model continues. Hosts without UI get the same text answers as before.
+
 - **Languages:** every tool takes an optional `language` ("ar" | "en"), which the model sets from the user's language; otherwise the card follows the host's locale. Arabic switches the widget to right-to-left and uses `name_ar` for businesses and services; everything else is English. Times are always Qatar time.
 - **Theme:** uses the host's colour and font variables, so light and dark follow the host.
 - **Mobile first:** works from 320px wide, 44px+ tap targets, respects safe-area insets, no nested vertical scrolling.

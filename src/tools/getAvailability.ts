@@ -30,7 +30,8 @@ export function registerGetAvailability(server: McpServer) {
         'If the requested date has no open times, the result shows the next day that has some, and note says so. ' +
         'Call it again only for a different service, or for one specific date to get the slot_id of a time the user picked. ' +
         'Only future slots with space left are returned; spots_left is how many places remain. ' +
-        'Present times to the user using start_label. Use slot_id from this result when calling create_booking.',
+        'Present times to the user using start_label. Use slot_id from this result when calling create_booking. ' +
+        'The user can also book directly in the card; if the card reports a booking through model context, it is already done: do not call create_booking again.',
       inputSchema: {
         business_id: z.uuid('business_id must be the id returned by search_businesses')
           .describe('business_id from search_businesses.'),
@@ -47,6 +48,8 @@ export function registerGetAvailability(server: McpServer) {
         service_name: z.string(),
         service_name_ar: z.string().nullable().optional(),
         service_id: z.string().optional(),
+        price_qar: z.number().optional(),
+        duration_min: z.number().optional(),
         date: z.string(),
         requested_date: z.string().optional(),
         timezone: z.string(),
@@ -71,7 +74,7 @@ export function registerGetAvailability(server: McpServer) {
 
       const [biz, svc] = await Promise.all([
         db().from('businesses').select('id,name_en,name_ar').eq('id', business_id).eq('is_active', true).maybeSingle(),
-        db().from('services').select('id,name_en,name_ar,duration_min,business_id')
+        db().from('services').select('id,name_en,name_ar,duration_min,price,business_id')
           .eq('id', service_id).eq('is_active', true).maybeSingle()
       ]);
       if (biz.error) throw biz.error;
@@ -124,6 +127,8 @@ export function registerGetAvailability(server: McpServer) {
         business_name_ar: biz.data.name_ar || null,
         service_id,
         service_name_ar: svc.data.name_ar || null,
+        price_qar: Number(svc.data.price),
+        duration_min: Number(svc.data.duration_min),
         requested_date: date,
         days: week.days
       }, answer);

@@ -87,6 +87,83 @@ h3, p, ul, dl, dd { margin: 0; }
 .meta { color: var(--color-text-secondary); overflow-wrap: anywhere; }
 .caption { color: var(--color-text-tertiary); font-size: var(--font-text-xs-size); }
 .head { display: grid; gap: 4px; }
+.head.with-back { display: flex; align-items: center; gap: 8px; }
+.head .avatar, .head img.avatar { flex: none; object-fit: cover; }
+.head-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+
+/* ── Navigation: back arrow, chevrons, step transitions ─────────────────── */
+
+:root { --dir: 1; }
+:root[dir="rtl"] { --dir: -1; }
+
+.back {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  margin-inline-start: -8px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  border: 0;
+  border-radius: var(--border-radius-full);
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 120ms ease, transform 100ms ease-out;
+}
+.back::after { content: ""; position: absolute; inset: -4px; }   /* 44px to hit */
+.back:active { transform: scale(0.94); background: var(--color-background-secondary); }
+.back:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
+
+/* a drawn chevron, so it mirrors cleanly in RTL (no glyph or font needed) */
+.chev {
+  width: 9px;
+  height: 9px;
+  border-inline-start: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
+  transform: rotate(calc(var(--dir) * 45deg));
+  margin-inline-start: 4px;
+}
+.chev.fwd {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-width: 0;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-start: 1.5px solid currentColor;
+  transform: rotate(calc(var(--dir) * 45deg));
+  margin: 0;
+  color: var(--color-text-tertiary);
+}
+
+/* forward comes in from the trailing edge, back from the leading edge */
+.step.enter-fwd > * { animation: step-fwd 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.step.enter-back > * { animation: step-back 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes step-fwd { from { opacity: 0; transform: translateX(calc(var(--dir) * 18px)); } }
+@keyframes step-back { from { opacity: 0; transform: translateX(calc(var(--dir) * -18px)); } }
+
+/* rows and cards that open the next step */
+button.tappable {
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background-color 120ms ease, transform 100ms ease-out;
+}
+button.tappable:active { background: var(--color-background-secondary); }
+button.tappable:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: -2px; }
+button.card.tappable {
+  padding: 0;
+  background: var(--color-background-primary);
+  border: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+button.card.tappable:active { transform: scale(0.985); }
 .foot { padding-block-start: 2px; }
 
 /* ── Business cards: a carousel that swipes horizontally ────────────────── */
@@ -156,6 +233,16 @@ h3, p, ul, dl, dd { margin: 0; }
 /* ── Compact place list (no photos) ─────────────────────────────────────── */
 
 .places { list-style: none; padding: 0; margin: 0; }
+.places li:not(.place) { display: block; }
+/* hairline that starts after the avatar, like an iOS inset list */
+.places li + li > .place::before, .place + .place::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline-start: 64px;
+  inset-inline-end: 0;
+  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
+}
 .place {
   display: flex;
   align-items: center;
@@ -163,15 +250,6 @@ h3, p, ul, dl, dd { margin: 0; }
   min-height: 60px;
   padding: 10px 16px;
   position: relative;
-}
-/* hairline that starts after the avatar, like an iOS inset list */
-.place + .place::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  inset-inline-start: 64px;
-  inset-inline-end: 0;
-  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
 }
 .avatar {
   flex: none;
@@ -306,6 +384,80 @@ h3, p, ul, dl, dd { margin: 0; }
 .day:focus-visible, .time:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
 .empty { color: var(--color-text-secondary); }
 
+/* ── Services ───────────────────────────────────────────────────────────── */
+
+.svc-list { list-style: none; padding: 0; margin: 0 -16px -16px; }
+.svc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 16px;
+  position: relative;
+}
+.svc-list li + li .svc::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  inset-inline: 16px 0;
+  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.svc-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.svc-title { font-weight: var(--font-weight-semibold); font-size: var(--font-text-md-size); line-height: 1.25; overflow-wrap: anywhere; }
+.svc-sub { color: var(--color-text-secondary); font-size: var(--font-text-xs-size); }
+.svc-price { flex: none; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── Details form ───────────────────────────────────────────────────────── */
+
+.summary { margin-block-start: -4px; }
+.summary .row:first-child { border-block-start: 0; }
+.details { display: grid; gap: 12px; }
+.field { display: grid; gap: 6px; }
+.field label { font-size: var(--font-text-xs-size); font-weight: var(--font-weight-medium); color: var(--color-text-secondary); }
+.input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 16px;                    /* 16px+ stops iOS from zooming the page on focus */
+  color: var(--color-text-primary);
+  background: var(--color-background-secondary);
+  border: var(--border-width-regular) solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-md);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.input::placeholder { color: var(--color-text-tertiary); }
+.input:focus { outline: none; border-color: var(--color-border-primary); box-shadow: 0 0 0 3px var(--color-ring-primary, rgb(0 0 0 / 0.2)); }
+.input.invalid { border-color: var(--color-border-danger); }
+.input:disabled { opacity: 0.6; }
+.field-error { color: var(--color-text-danger); font-size: var(--font-text-xs-size); }
+.form-error {
+  padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-danger);
+  color: var(--color-text-danger);
+  font-size: var(--font-text-sm-size);
+}
+
+.btn {
+  min-height: 48px;
+  width: 100%;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-text-md-size);
+  border-radius: var(--border-radius-lg);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 100ms ease-out, opacity 120ms ease;
+}
+.btn.primary { background: var(--color-background-inverse); color: var(--color-text-inverse); border: 0; }
+.btn.secondary { background: var(--color-background-secondary); color: var(--color-text-primary); border: var(--border-width-regular) solid var(--color-border-secondary); }
+.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
+
 /* ── Booking confirmation ───────────────────────────────────────────────── */
 
 .badge {
@@ -365,6 +517,11 @@ h3, p, ul, dl, dd { margin: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .sk, .times.swap { animation: none; }
+  .step.enter-fwd > *, .step.enter-back > * { animation: fade-in 150ms ease; }
+  button.tappable, .btn, .back { transition: none; }
+  button.card.tappable:active, .btn:active:not(:disabled), .back:active { transform: none; }
   .day, .time { transition: none; }
   .day:active:not(:disabled), .time:active:not(:disabled) { transform: none; }
 }
+
+@keyframes fade-in { from { opacity: 0; } }

@@ -33,6 +33,8 @@ export type AvailabilityResult = {
   service_id?: string;
   service_name: string;
   service_name_ar?: string | null;
+  price_qar?: number;
+  duration_min?: number;
   /* the day shown first: requested_date, or the next one with open times */
   date: string;
   requested_date?: string;
@@ -51,6 +53,7 @@ export type BookingResult = {
   service_name: string;
   service_name_ar?: string | null;
   start: string;
+  start_label?: string;
 };
 
 export type ToolName = 'search_businesses' | 'get_availability' | 'create_booking';
