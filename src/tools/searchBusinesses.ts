@@ -4,6 +4,7 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { cleanText, guard, ok } from '../lib/results.js';
 import { coverImage } from '../lib/images.js';
+import { languageInput } from '../lib/language.js';
 import { WIDGET_URI } from '../widget.js';
 
 const serviceOut = z.object({
@@ -47,7 +48,8 @@ export function registerSearchBusinesses(server: McpServer) {
         'with the services each one offers, their duration and price in QAR. ' +
         'Use this first, for any request to find, browse or compare places, and to look up a business the user named. ' +
         'All filters are optional. Use the returned business_id and service_id with get_availability. ' +
-        'Never invent ids, prices or businesses. If nothing matches, say so and offer to search with fewer filters.',
+        'Never invent ids, prices or businesses. If nothing matches, say so and offer to search with fewer filters. ' +
+        'After showing results, ask which business and service the user wants; do not check availability for every business or service.',
       inputSchema: {
         category: z.string().trim().min(1).max(50).optional()
           .describe('Kind of business, e.g. "gym", "barber", "salon", "spa", "clinic". Omit to search all.'),
@@ -56,7 +58,8 @@ export function registerSearchBusinesses(server: McpServer) {
         query: z.string().trim().min(1).max(100).optional()
           .describe('Free text matched against business names and descriptions, e.g. a business the user named.'),
         limit: z.number().int().min(1).max(10).default(5)
-          .describe('How many businesses to return. Default 5, max 10.')
+          .describe('How many businesses to return. Default 5, max 10.'),
+        language: languageInput
       },
       outputSchema: {
         businesses: z.array(businessOut),

@@ -24,13 +24,21 @@ export type SearchResult = { businesses: Business[]; count: number; note?: strin
 
 export type Slot = { slot_id: string; start: string; end: string; start_label: string; spots_left: number };
 
+export type Day = { date: string; slots: Slot[] };
+
 export type AvailabilityResult = {
+  business_id?: string;
   business_name: string;
   business_name_ar?: string | null;
+  service_id?: string;
   service_name: string;
   service_name_ar?: string | null;
+  /* the day shown first: requested_date, or the next one with open times */
   date: string;
+  requested_date?: string;
   slots: Slot[];
+  /* all 7 days from requested_date, preloaded so switching is instant */
+  days?: Day[];
   note?: string;
 };
 

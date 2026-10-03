@@ -8,6 +8,7 @@ import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
 import { notifyTelegram } from '../lib/telegram.js';
 import { WIDGET_URI } from '../widget.js';
+import { languageInput } from '../lib/language.js';
 
 /* create_guest_booking raises these by name (0004_mcp_guest_bookings.sql).
    Each becomes a sentence the model can pass straight to the user. None of
@@ -72,7 +73,8 @@ export function registerCreateBooking(server: McpServer) {
         notes: z.string().trim().max(500, 'notes must be 500 characters or fewer').optional()
           .describe('Optional note for the business, e.g. "first visit".'),
         request_id: z.string().trim().min(1).max(100, 'request_id must be 100 characters or fewer').optional()
-          .describe('Idempotency key. Generate one per new booking and reuse it on retries.')
+          .describe('Idempotency key. Generate one per new booking and reuse it on retries.'),
+        language: languageInput
       },
       outputSchema: {
         booking_id: z.string(),

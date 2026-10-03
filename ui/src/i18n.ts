@@ -25,6 +25,12 @@ const STRINGS = {
     noBusinesses: 'No businesses matched this search.',
     moreServices: (n: number) => `+${n} more`,
     noSlots: 'No open times on this day.',
+    noWeek: 'No open times in the next 7 days.',
+    moved: (requested: string, shown: string) => `No times on ${requested}, showing ${shown}`,
+    today: 'Today',
+    tomorrow: 'Tomorrow',
+    periods: { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' },
+    from: (price: string) => `from ${price}`,
     left: (n: number) => `${n} left`,
     pickTime: 'Tap a time to continue',
     sent: 'Sent. Continue in the chat.',
@@ -43,6 +49,12 @@ const STRINGS = {
     noBusinesses: 'لا توجد أماكن مطابقة لهذا البحث.',
     moreServices: (n: number) => `+${n} أخرى`,
     noSlots: 'لا توجد مواعيد متاحة في هذا اليوم.',
+    noWeek: 'لا توجد مواعيد متاحة خلال الأيام السبعة القادمة.',
+    moved: (requested: string, shown: string) => `لا مواعيد يوم ${requested}، نعرض ${shown}`,
+    today: 'اليوم',
+    tomorrow: 'غداً',
+    periods: { morning: 'الصباح', afternoon: 'بعد الظهر', evening: 'المساء' },
+    from: (price: string) => `من ${price}`,
     left: (n: number) => `متبقي ${n}`,
     pickTime: 'اختر موعداً للمتابعة',
     sent: 'تم الإرسال. أكمل في المحادثة.',
@@ -99,3 +111,31 @@ export function categoryLabel(category: string, lang: Lang): string {
 
 /* Arabic name when the UI is Arabic and one exists, else the English one */
 export const pick = (en: string, ar: string | null | undefined, lang: Lang) => (lang === 'ar' && ar ? ar : en);
+
+/* ── Day strip and time groups ── */
+
+/* YYYY-MM-DD in Qatar for an instant (default: now) */
+export function qatarDate(at = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+}
+
+/* the chip's two lines: "Today" / "Sun" over "4" */
+export function dayChip(ymd: string, lang: Lang, today = qatarDate()): { top: string; num: string } {
+  const t = strings(lang);
+  const at = new Date(`${ymd}T12:00:00+03:00`);
+  const tomorrow = qatarDate(new Date(new Date(`${today}T12:00:00+03:00`).getTime() + 86_400_000));
+  const top = ymd === today ? t.today
+    : ymd === tomorrow ? t.tomorrow
+    : new Intl.DateTimeFormat(intlLocale(lang), { timeZone: TZ, weekday: 'short' }).format(at);
+  const num = new Intl.DateTimeFormat(intlLocale(lang), { timeZone: TZ, day: 'numeric' }).format(at);
+  return { top, num };
+}
+
+export type Period = 'morning' | 'afternoon' | 'evening';
+
+/* the server sends starts in Qatar time ("…T18:00:00+03:00"), so the hour
+   is right there: before 12 morning, 12–17 afternoon, 17 on evening */
+export function periodOf(qatarIso: string): Period {
+  const hour = Number(qatarIso.slice(11, 13));
+  return hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+}

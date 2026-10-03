@@ -20,6 +20,13 @@ export function isRealDate(ymd: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === ymd;
 }
 
+/* 2026-10-03 + 2 → 2026-10-05 (calendar arithmetic, no timezone involved) */
+export function addDays(ymd: string, n: number): string {
+  const d = new Date(ymd + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
 /* [start, end) of a Qatar calendar day, as UTC instants */
 export function qatarDayRange(ymd: string): { from: Date; to: Date } {
   const from = new Date(ymd + 'T00:00:00+03:00');

@@ -30,15 +30,15 @@ Each is normalised to `+974XXXXXXXX`, the only form stored (a DB CHECK enforces 
 
 ## Inline UI (MCP Apps)
 
-In hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (Claude, ChatGPT), each tool result also renders as an inline widget. The UI is extra: text-only clients get exactly the same text answers as before.
+In hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-apps) (Claude, ChatGPT), each tool result also renders as an inline widget. The UI is extra: text-only clients get the same text answers (the 7-day preload, ids and Arabic names go to the card only, in `structuredContent`). The tool descriptions tell the model to ask which service first and call `get_availability` once, never looping over services or days.
 
 | Tool | Widget |
 |---|---|
-| `search_businesses` | Swipeable cards: photo (or a coloured initial), name, category · area, services with QAR price and duration |
-| `get_availability` | The day's times as buttons, e.g. `6:00 PM · 5 left`. Tapping one sends a chat message ("I want the 6:00 PM slot on Mon 5 Oct for CrossFit class at Falcon Gym."), so the model carries on as usual and still confirms name and phone before booking |
+| `search_businesses` | No photos: a compact list (initial, name, category · area, "from" price). With a photo: swipeable cards with services, prices and durations |
+| `get_availability` | One booking card for the next 7 days: a day strip (empty days greyed) and that day's times grouped under Morning / Afternoon / Evening ("2 left" only when 2 or fewer remain). All 7 days come with the first result, so switching days is instant. If the requested day is empty, it opens on the next day with times and says so. Tapping a time tells the model its `slot_id` (`updateModelContext`) and sends a chat message ("I want the 7:00 PM slot on Thu 8 Oct for CrossFit class at Falcon Gym."); the model still confirms name and phone before booking |
 | `create_booking` | Confirmation card: **Pending** badge, business, service, Qatar date and time, reference. Never the phone |
 
-- **Languages:** follows the host's locale. Arabic switches the widget to right-to-left and uses `name_ar` for businesses and services; everything else is English. Times are always Qatar time.
+- **Languages:** every tool takes an optional `language` ("ar" | "en"), which the model sets from the user's language; otherwise the card follows the host's locale. Arabic switches the widget to right-to-left and uses `name_ar` for businesses and services; everything else is English. Times are always Qatar time.
 - **Theme:** uses the host's colour and font variables, so light and dark follow the host.
 - **Mobile first:** works from 320px wide, 44px+ tap targets, respects safe-area insets, no nested vertical scrolling.
 - **Photos:** the first entry of `businesses.images` (the app's cover photo), only if it is a public Supabase Storage URL on `IMAGE_HOST`. The widget's CSP allows that one host and nothing else, and the widget makes no network calls. To add a photo, upload it to a public bucket and put its public URL first in `images`.

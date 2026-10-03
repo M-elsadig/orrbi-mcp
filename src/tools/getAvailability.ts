@@ -3,8 +3,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { fail, guard, ok } from '../lib/results.js';
+import { languageInput } from '../lib/language.js';
+import { WINDOW_DAYS, buildWeek } from '../lib/availability.js';
 import { WIDGET_URI } from '../widget.js';
-import { TZ_LABEL, isRealDate, qatarDayRange, qatarLabel, todayInQatar, toQatarIso } from '../lib/time.js';
+import { TZ_LABEL, addDays, isRealDate, qatarDayRange, todayInQatar } from '../lib/time.js';
 
 const slotOut = z.object({
   slot_id: z.string(),
@@ -21,8 +23,12 @@ export function registerGetAvailability(server: McpServer) {
     {
       title: 'Get available times',
       description:
-        'List the open booking times for one service at one business on one day, in Qatar time (UTC+3). ' +
-        'Call this before offering or promising any specific time, using business_id and service_id from search_businesses. ' +
+        'List the open booking times for one service at one business, in Qatar time (UTC+3). ' +
+        'If the user has not said which service they want, ask them first; do not check every service. ' +
+        'Then call this ONCE for that service, with the date the user asked for (or today). ' +
+        'Never call it in a loop over services or dates: the card shown to the user already covers the next 7 days and lets them switch days and pick a time. ' +
+        'If the requested date has no open times, the result shows the next day that has some, and note says so. ' +
+        'Call it again only for a different service, or for one specific date to get the slot_id of a time the user picked. ' +
         'Only future slots with space left are returned; spots_left is how many places remain. ' +
         'Present times to the user using start_label. Use slot_id from this result when calling create_booking.',
       inputSchema: {
@@ -31,16 +37,21 @@ export function registerGetAvailability(server: McpServer) {
         service_id: z.uuid('service_id must be the id returned by search_businesses')
           .describe('service_id from search_businesses; must belong to this business.'),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be in YYYY-MM-DD format, e.g. 2026-10-05')
-          .describe('The day to check, as YYYY-MM-DD in Qatar time.')
+          .describe('The day to check, as YYYY-MM-DD in Qatar time.'),
+        language: languageInput
       },
       outputSchema: {
         business_name: z.string(),
         business_name_ar: z.string().nullable().optional(),
+        business_id: z.string().optional(),
         service_name: z.string(),
         service_name_ar: z.string().nullable().optional(),
+        service_id: z.string().optional(),
         date: z.string(),
+        requested_date: z.string().optional(),
         timezone: z.string(),
         slots: z.array(slotOut),
+        days: z.array(z.object({ date: z.string(), slots: z.array(slotOut) })).optional(),
         note: z.string().optional()
       },
       annotations: {
@@ -71,7 +82,9 @@ export function registerGetAvailability(server: McpServer) {
         return fail(`That service is not offered by ${biz.data.name_en}. Use search_businesses to see its current services and their service_ids.`);
       }
 
-      const { from, to } = qatarDayRange(date);
+      /* the whole week in one query: the card switches days without asking again */
+      const from = qatarDayRange(date).from;
+      const to = qatarDayRange(addDays(date, WINDOW_DAYS - 1)).to;
       const { data, error } = await db()
         .from('availability')
         .select('id,starts_at,capacity,booked_count')
@@ -80,40 +93,39 @@ export function registerGetAvailability(server: McpServer) {
         .gte('starts_at', from.toISOString())
         .lt('starts_at', to.toISOString())
         .order('starts_at', { ascending: true })
-        .limit(200);
+        .limit(1000);
       if (error) throw error;
 
-      const now = Date.now();
-      const durationMs = Number(svc.data.duration_min) * 60_000;
-      const slots = (data ?? [])
-        .filter((s) => new Date(s.starts_at).getTime() > now && Number(s.booked_count) < Number(s.capacity))
-        .map((s) => {
-          const start = new Date(s.starts_at);
-          return {
-            slot_id: s.id as string,
-            start: toQatarIso(start),
-            end: toQatarIso(new Date(start.getTime() + durationMs)),
-            start_label: qatarLabel(start),
-            spots_left: Number(s.capacity) - Number(s.booked_count)
-          };
-        });
+      const week = buildWeek(data ?? [], date, Number(svc.data.duration_min), Date.now());
+      const svcName = svc.data.name_en;
+      const bizName = biz.data.name_en;
 
+      let note: string | undefined;
+      if (!week.slots.length) {
+        note = `No open times for ${svcName} at ${bizName} in the ${WINDOW_DAYS} days from ${date}. Offer to check a later date.`;
+      } else if (week.date !== date) {
+        note = `No open times on ${date}; showing the next available day, ${week.date}.`;
+      }
+
+      /* what the model reads: the same keys as before, for the day shown */
       const answer = {
-        business_name: biz.data.name_en,
-        service_name: svc.data.name_en,
-        date,
+        business_name: bizName,
+        service_name: svcName,
+        date: week.date,
         timezone: TZ_LABEL,
-        slots,
-        ...(slots.length ? {} : {
-          note: `No open times for ${svc.data.name_en} at ${biz.data.name_en} on ${date}. Offer to check another date.`
-        })
+        slots: week.slots,
+        ...(note ? { note } : {})
       };
 
-      /* Arabic names for the UI only; the text answer is unchanged */
+      /* the card also gets the other six days, ids and Arabic names */
       return ok({
         ...answer,
+        business_id,
         business_name_ar: biz.data.name_ar || null,
-        service_name_ar: svc.data.name_ar || null
+        service_id,
+        service_name_ar: svc.data.name_ar || null,
+        requested_date: date,
+        days: week.days
       }, answer);
     })
   );
