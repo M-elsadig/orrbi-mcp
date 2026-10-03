@@ -159,6 +159,7 @@ export function registerCreateBooking(server: McpServer) {
             reference: row.reference,
             business_name: row.business_name,
             service_name: row.service_name,
+            starts_at: row.starts_at,
             start_label: startLabel,
             customer_name: args.customer_name,
             customer_phone: phone,

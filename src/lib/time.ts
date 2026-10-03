@@ -43,3 +43,13 @@ export function qatarLabel(at: Date | string): string {
   for (const part of f.formatToParts(d)) p[part.type] = part.value;
   return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${(p.dayPeriod ?? '').toUpperCase()}`;
 }
+
+/* الاثنين، 5 أكتوبر في 6:00 م — Arabic names, Western digits to match the
+   reference and phone number around it */
+export function qatarLabelAr(at: Date | string): string {
+  const d = typeof at === 'string' ? new Date(at) : at;
+  return new Intl.DateTimeFormat('ar-QA-u-nu-latn', {
+    timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  }).format(d);
+}
