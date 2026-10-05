@@ -5,6 +5,7 @@ import { db } from '../lib/supabase.js';
 import { cleanText, guard, ok } from '../lib/results.js';
 import { coverImage } from '../lib/images.js';
 import { languageInput } from '../lib/language.js';
+import { categoryOf, resolveCategory } from '../lib/category.js';
 import { WIDGET_URI } from '../widget.js';
 
 const serviceOut = z.object({
@@ -52,7 +53,7 @@ export function registerSearchBusinesses(server: McpServer) {
         'After showing results, ask which business and service the user wants; do not check availability for every business or service.',
       inputSchema: {
         category: z.string().trim().min(1).max(50).optional()
-          .describe('Kind of business, e.g. "gym", "barber", "salon", "spa", "clinic". Omit to search all.'),
+          .describe('Kind of business, e.g. "gym", "barber", "salon", "spa", "clinic". Fitness, studio, CrossFit, workout and training all mean "gym". Omit to search all.'),
         area: z.string().trim().min(1).max(80).optional()
           .describe('Neighbourhood or district in Qatar, e.g. "Al Sadd", "The Pearl", "West Bay".'),
         query: z.string().trim().min(1).max(100).optional()
@@ -84,9 +85,13 @@ export function registerSearchBusinesses(server: McpServer) {
         .order('name_en', { ascending: true })
         .limit(limit);
 
-      const cat = category ? cleanText(category) : '';
+      /* "fitness", "crossfit", "جيم" all mean the stored category gym. A
+         query that is only a category word ("gym near me") searches by
+         category too, since no business name or description would match. */
+      const queryCategory = !category && query ? categoryOf(query) : null;
+      const cat = category ? cleanText(resolveCategory(category)) : queryCategory ?? '';
       const where = area ? cleanText(area) : '';
-      const text = query ? cleanText(query) : '';
+      const text = query && !queryCategory ? cleanText(query) : '';
 
       if (cat) q = q.ilike('category', cat);
       if (where) q = q.ilike('area', `%${where}%`);
@@ -127,6 +132,6 @@ export function registerSearchBusinesses(server: McpServer) {
         { businesses: forUi, count: businesses.length, ...note },
         { businesses, count: businesses.length, ...note }
       );
-    })
+    }, { category, area, query, limit })
   );
 }

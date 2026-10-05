@@ -190,6 +190,8 @@ vercel env add SUPABASE_URL production
 vercel env add SUPABASE_SERVICE_ROLE_KEY production
 vercel env add ORRBI_MCP_USER_ID production
 vercel env add N8N_WEBHOOK_URL production      # optional
+vercel env add TELEGRAM_BOT_TOKEN production   # booking alerts + error pings
+vercel env add TELEGRAM_CHAT_ID production
 vercel --prod
 ```
 Your server is at **`https://<project>.vercel.app/mcp`**. `vercel.json` declares `api/mcp.ts` as the only function (an explicit `@vercel/node` build, so Vercel's zero-config detection doesn't treat `src/` files as entrypoints) and routes `/mcp` to it. Vercel will log that Project Settings build options don't apply; that is expected.
@@ -203,6 +205,21 @@ curl -s https://<project>.vercel.app/mcp -H "Content-Type: application/json" \
 curl -s -o /dev/null -w "%{http_code}\n" https://<project>.vercel.app/mcp -H "Origin: https://evil.example" \
   -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
+
+## Errors
+
+An unexpected failure answers *"Something went wrong on our side (error ref E-XXXXXX)"*. The cause is in three places:
+
+- **Telegram:** a ⚠️ ping with the ref, the error and the tool arguments (so a failed booking can still be done by hand).
+- **`public.mcp_errors`:** one row per ref, with the message, Postgres code, details, a short stack and the arguments (phone numbers reduced to their last 3 digits). RLS is on with no policies, so only the service role can read it.
+- **Vercel function logs:** the full error, searchable by ref.
+
+```sql
+select * from mcp_errors where ref = 'E-XXXXXX';
+select created_at, ref, source, message, code from mcp_errors order by created_at desc limit 20;
+```
+
+A booking whose Telegram alert could not be sent (including `TELEGRAM_* is not set`) is logged there too, as `create_booking.telegram_alert`, so a missed alert always leaves a trace. The booking itself is in `bookings` regardless.
 
 ## Add to Claude as a custom connector
 

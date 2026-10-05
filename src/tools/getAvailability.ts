@@ -132,6 +132,6 @@ export function registerGetAvailability(server: McpServer) {
         requested_date: date,
         days: week.days
       }, answer);
-    })
+    }, { business_id, service_id, date })
   );
 }

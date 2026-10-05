@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
-import { GENERIC_ERROR, fail, guard, ok } from '../lib/results.js';
+import { fail, failUnexpected, guard, ok } from '../lib/results.js';
+import { reportError } from '../lib/errors.js';
 import { PHONE_MESSAGE, normalizeQatarPhone } from '../lib/phone.js';
 import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
@@ -102,11 +103,12 @@ export function registerCreateBooking(server: McpServer) {
       const phone = normalizeQatarPhone(args.customer_phone);
       if (!phone) return fail(PHONE_MESSAGE);
 
+      /* the owner's Telegram ping carries the full arguments, phone included,
+         so a booking that fails unexpectedly still reaches them */
+      const unexpected = (where: string, e: unknown) => failUnexpected(where, e, args);
+
       const owner = process.env.ORRBI_MCP_USER_ID;
-      if (!owner) {
-        console.error('[create_booking] ORRBI_MCP_USER_ID is not set');
-        return fail('Booking is temporarily unavailable. Please try again later.');
-      }
+      if (!owner) return unexpected('create_booking.config', new Error('ORRBI_MCP_USER_ID is not set'));
 
       const params = {
         p_owner_id: owner,
@@ -130,25 +132,23 @@ export function registerCreateBooking(server: McpServer) {
       if (res.error) {
         const known = DB_ERRORS[res.error.message];
         if (known) return fail(known);
-        console.error('[create_booking] rpc failed', res.error.code, res.error.message);
-        return fail(GENERIC_ERROR);
+        return unexpected('create_booking.rpc', res.error);
       }
 
       const row = (res.data as Booked[] | null)?.[0];
-      if (!row) {
-        console.error('[create_booking] rpc returned no row');
-        return fail(GENERIC_ERROR);
-      }
+      if (!row) return unexpected('create_booking.rpc', new Error('create_guest_booking returned no row'));
 
       const start = toQatarIso(row.starts_at);
       const startLabel = qatarLabel(row.starts_at);
 
+      /* Arabic names for the UI and the price for the alert. Capped and best
+         effort, so it can't hold the booking up for long or throw. */
+      const extra = await serviceDetails(args.business_id, args.service_id);
+
       /* a retried request_id already notified everyone the first time.
-         Notifications and the Arabic-name lookup run side by side, each
-         capped, and none of them can throw. */
-      const [ar] = await Promise.all([
-        arabicNames(args.business_id, args.service_id),
-        row.deduped ? null : Promise.all([
+         Neither notification can throw. */
+      if (!row.deduped) {
+        const [, alertFailed] = await Promise.all([
           notifyBookingCreated({
             event: 'booking.created',
             source: 'mcp',
@@ -159,6 +159,7 @@ export function registerCreateBooking(server: McpServer) {
             business_name: row.business_name,
             service_id: args.service_id,
             service_name: row.service_name,
+            price_qar: extra.price,
             slot_id: args.slot_id,
             start,
             start_label: startLabel,
@@ -170,14 +171,22 @@ export function registerCreateBooking(server: McpServer) {
             reference: row.reference,
             business_name: row.business_name,
             service_name: row.service_name,
+            price_qar: extra.price,
             starts_at: row.starts_at,
             start_label: startLabel,
             customer_name: args.customer_name,
             customer_phone: phone,
             notes: args.notes || null
           })
-        ])
-      ]);
+        ]);
+
+        /* the booking is saved either way; this makes sure a missed alert
+           still shows up in mcp_errors. No ping: Telegram is what failed. */
+        if (alertFailed) {
+          await reportError('create_booking.telegram_alert', new Error(alertFailed),
+            { reference: row.reference, booking_id: row.booking_id, business_name: row.business_name }, { ping: false });
+        }
+      }
 
       const answer = {
         booking_id: row.booking_id,
@@ -194,21 +203,29 @@ export function registerCreateBooking(server: McpServer) {
 
       /* Arabic names for the UI only; the text answer is unchanged, and the
          phone is in neither */
-      return ok({ ...answer, business_name_ar: ar.business, service_name_ar: ar.service }, answer);
-    })
+      return ok({ ...answer, business_name_ar: extra.business_ar, service_name_ar: extra.service_ar }, answer);
+    }, args)
   );
 }
 
 /* Best effort: the booking is already made, so a failed lookup just means
-   the Arabic UI shows the English names. */
-async function arabicNames(businessId: string, serviceId: string): Promise<{ business: string | null; service: string | null }> {
+   the Arabic UI shows the English names and the alert says the price is
+   unknown. */
+async function serviceDetails(businessId: string, serviceId: string):
+  Promise<{ business_ar: string | null; service_ar: string | null; price: number | null }> {
   try {
+    const signal = AbortSignal.timeout(2000);
     const [b, s] = await Promise.all([
-      db().from('businesses').select('name_ar').eq('id', businessId).maybeSingle(),
-      db().from('services').select('name_ar').eq('id', serviceId).maybeSingle()
+      db().from('businesses').select('name_ar').eq('id', businessId).abortSignal(signal).maybeSingle(),
+      db().from('services').select('name_ar,price').eq('id', serviceId).abortSignal(signal).maybeSingle()
     ]);
-    return { business: b.data?.name_ar || null, service: s.data?.name_ar || null };
+    const price = s.data?.price;
+    return {
+      business_ar: b.data?.name_ar || null,
+      service_ar: s.data?.name_ar || null,
+      price: price == null || price === '' ? null : Number(price)
+    };
   } catch {
-    return { business: null, service: null };
+    return { business_ar: null, service_ar: null, price: null };
   }
 }

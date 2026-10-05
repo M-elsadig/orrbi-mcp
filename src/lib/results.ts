@@ -1,4 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { reportError } from './errors.js';
 
 /* Every tool answers with the same object twice: structuredContent for
    clients that read the output schema (and for the UI), and a JSON text block
@@ -19,18 +20,24 @@ export function fail(message: string): CallToolResult {
   return { isError: true, content: [{ type: 'text', text: message }] };
 }
 
-export const GENERIC_ERROR =
-  'Something went wrong on our side. Please try again in a moment.';
+/* The ref lets the owner find the cause in mcp_errors (see errors.ts). */
+export const genericError = (ref: string) =>
+  `Something went wrong on our side (error ref ${ref}). Please try again in a moment.`;
+
+/* Record an unexpected error and answer with the plain sentence. */
+export async function failUnexpected(source: string, error: unknown, context: Record<string, unknown> = {}): Promise<CallToolResult> {
+  return fail(genericError(await reportError(source, error, context)));
+}
 
 /* The SDK turns a thrown error into a tool result carrying error.message,
-   which would hand DB internals to the model. Catch here instead: log the
-   detail, show the user a plain sentence. */
-export async function guard(tool: string, run: () => Promise<CallToolResult>): Promise<CallToolResult> {
+   which would hand DB internals to the model. Catch here instead: record the
+   detail, show the user a plain sentence. `context` is the tool's arguments,
+   so the error can be reproduced; phones are redacted before storing. */
+export async function guard(tool: string, run: () => Promise<CallToolResult>, context: Record<string, unknown> = {}): Promise<CallToolResult> {
   try {
     return await run();
   } catch (e) {
-    console.error(`[${tool}]`, e);
-    return fail(GENERIC_ERROR);
+    return failUnexpected(tool, e, context);
   }
 }
 

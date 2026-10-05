@@ -6,6 +6,7 @@ const alert = {
   reference: 'ATO-KX4CTS',
   business_name: 'Falcon Gym',
   service_name: 'CrossFit class',
+  price_qar: 60,
   starts_at: '2026-10-05T15:00:00+00:00',   // 6:00 PM in Qatar
   start_label: 'Mon 5 Oct, 6:00 PM',
   customer_name: 'Mohamed Test',
