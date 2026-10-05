@@ -208,12 +208,19 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<project>.vercel.app/mcp -H "Or
 
 ## Telegram alert buttons
 
-Each new-booking alert has **✅ Confirmed** and **❌ Couldn't book**. Book in the business's own app, then tap one:
+Each new-booking alert shows the price ("100 QAR — pay at the gym"), who to call to book (`business_private.booking_contact_*`), and the cancellation windows. It has **✅ Confirmed** and **❌ Couldn't book**. Book in the business's own app, then tap one:
 
-- ✅ sets the booking `pending → confirmed`, and the alert keeps a button with the prefilled WhatsApp confirmation for the customer.
-- ❌ sets `pending → failed` (frees the slot), and the button becomes a plain WhatsApp chat so you can contact the customer.
+- ✅ sets the booking `pending → confirmed`. The alert keeps the prefilled WhatsApp confirmation (with the payment line, cancellation window and first-visit note) and gains **🚫 No-show (after class)**.
+- ❌ sets `pending → failed` and gives the spot back to the slot (`booked_count - 1`). The button becomes a plain WhatsApp chat so you can contact the customer.
+- 🚫 sets `confirmed → no_show`, only once the class has started (earlier taps are refused). The alert shows the customer's no-show count.
 
-Either way the alert is edited to show the outcome and when, and the ✅/❌ buttons disappear. A tap only acts on MCP bookings that are still `pending`; a second tap, or a booking changed in the app meanwhile, changes nothing and says so. Every change is logged to `booking_events` by the existing audit trigger.
+**No-shows:** customers pay at the gym, so a no-show costs the business a spot. After **2** no-shows (`NO_SHOW_LIMIT` in `src/tools/createBooking.ts`, counted per phone by `mcp_no_show_count`) the number can't book: `create_booking` politely tells them to contact the Orrbi team (with a WhatsApp link if `ORRBI_SUPPORT_WHATSAPP` is set), and you get a 🚫 Telegram ping. To unblock someone, change one of their `no_show` bookings to `completed` or `cancelled`.
+
+Each tap is one locked transaction in `mcp_set_booking_outcome` (tend-app migration 0006). It only acts on MCP bookings in the right state; a second tap, or a booking changed in the app meanwhile, changes nothing and says so. Every change lands in `booking_events` as `admin`/`telegram`.
+
+## Payment
+
+Orrbi never takes payment. For a business with `pay_at_venue` (Aflete), every price reads "100 QAR — pay at the gym" in search results, availability, the card, the booking confirmation, the Telegram alert and the WhatsApp template (`src/lib/payment.ts`, shared by server and card). The server instructions tell the assistant never to say payment happens in Orrbi.
 
 Taps reach `POST /telegram` (`src/telegramWebhook.ts`). Only Telegram can call it: the bot's webhook is registered with a secret derived from the bot token, which Telegram sends back in a header. Only taps from `TELEGRAM_CHAT_ID` count. Register the webhook once after deploying:
 

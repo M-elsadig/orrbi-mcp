@@ -7,6 +7,8 @@ export type Service = {
   name_ar?: string | null;
   duration_min: number;
   price_qar: number;
+  pay_at_venue?: boolean;
+  ladies_only?: boolean;
 };
 
 export type Business = {
@@ -34,6 +36,8 @@ export type AvailabilityResult = {
   service_name: string;
   service_name_ar?: string | null;
   price_qar?: number;
+  pay_at_venue?: boolean;
+  category?: string;
   duration_min?: number;
   /* the day shown first: requested_date, or the next one with open times */
   date: string;
@@ -54,6 +58,11 @@ export type BookingResult = {
   service_name_ar?: string | null;
   start: string;
   start_label?: string;
+  price_qar?: number | null;
+  pay_at_venue?: boolean;
+  category?: string | null;
+  first_visit?: string;
+  first_visit_ar?: string | null;
 };
 
 export type ToolName = 'search_businesses' | 'get_availability' | 'create_booking';

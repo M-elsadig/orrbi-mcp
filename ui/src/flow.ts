@@ -16,6 +16,9 @@ export type Choice = {
   service_name_ar?: string | null;
   price_qar?: number;
   duration_min?: number;
+  /* to say "pay at the gym" next to the price */
+  pay_at_venue?: boolean;
+  category?: string;
 };
 
 export type DetailsForm = { name: string; phone: string };
@@ -82,7 +85,9 @@ export function choiceFor(b: Business, serviceId: string): Choice | null {
     service_name: s.name,
     service_name_ar: s.name_ar,
     price_qar: s.price_qar,
-    duration_min: s.duration_min
+    duration_min: s.duration_min,
+    pay_at_venue: s.pay_at_venue,
+    category: b.category
   };
 }
 
@@ -97,6 +102,8 @@ export function choiceFromAvailability(r: AvailabilityResult): Choice | null {
     service_name: r.service_name,
     service_name_ar: r.service_name_ar,
     price_qar: r.price_qar,
-    duration_min: r.duration_min
+    duration_min: r.duration_min,
+    pay_at_venue: r.pay_at_venue,
+    category: r.category
   };
 }

@@ -51,7 +51,7 @@ export function bookedNote(b: BookingResult): string {
 
 /* create_booking's error sentences (src/tools/createBooking.ts) → what the
    card says, and whether the user should go back and pick another time */
-export type BookingErrorKind = 'slotGone' | 'duplicate' | 'tooMany' | 'phone' | 'other';
+export type BookingErrorKind = 'slotGone' | 'duplicate' | 'tooMany' | 'phone' | 'blocked' | 'other';
 
 export function classifyBookingError(text: string): { kind: BookingErrorKind; retime: boolean } {
   const t = text.toLowerCase();
@@ -61,5 +61,6 @@ export function classifyBookingError(text: string): { kind: BookingErrorKind; re
   if (t.includes('already has a booking for that exact time')) return { kind: 'duplicate', retime: false };
   if (t.includes('booking requests waiting')) return { kind: 'tooMany', retime: false };
   if (t.includes('qatar mobile number')) return { kind: 'phone', retime: false };
+  if (t.includes('missed bookings')) return { kind: 'blocked', retime: false };
   return { kind: 'other', retime: false };
 }

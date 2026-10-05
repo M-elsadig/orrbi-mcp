@@ -3,6 +3,8 @@
    both, to match references, prices and phone numbers. All times are Qatar
    time, whatever the viewer's device says. */
 
+import { paymentNote, priceText } from '../../src/lib/payment.js';
+
 const TZ = 'Asia/Qatar';
 
 export type Lang = 'en' | 'ar';
@@ -68,9 +70,11 @@ const STRINGS = {
       duplicate: 'This number already has a booking at this time.',
       tooMany: 'This number already has 3 bookings waiting for confirmation.',
       phone: 'Check the mobile number: 8 digits, optionally starting with +974.',
-      other: 'Couldn’t complete the booking. Please try again.'
+      other: 'Couldn’t complete the booking. Please try again.',
+      blocked: 'This number can’t book through Orrbi right now because of missed bookings. Please contact the Orrbi team and we’ll sort it out.'
     },
-    booked: 'Booking requested'
+    booked: 'Booking requested',
+    firstVisit: 'First visit'
   },
   ar: {
     placesFound: (n: number) => (n === 1 ? 'مكان واحد' : n === 2 ? 'مكانان' : `${n} أماكن`),
@@ -120,9 +124,11 @@ const STRINGS = {
       duplicate: 'لدى هذا الرقم حجز في هذا الموعد بالفعل.',
       tooMany: 'لدى هذا الرقم 3 حجوزات بانتظار التأكيد.',
       phone: 'تحقق من رقم الجوال: 8 أرقام، ويمكن أن يبدأ بـ ‎+974.',
-      other: 'تعذّر إتمام الحجز. حاول مرة أخرى.'
+      other: 'تعذّر إتمام الحجز. حاول مرة أخرى.',
+      blocked: 'لا يمكن لهذا الرقم الحجز عبر أوربي حالياً بسبب حجوزات لم يتم حضورها. تواصل مع فريق أوربي وسنساعدك.'
     },
-    booked: 'تم طلب الحجز'
+    booked: 'تم طلب الحجز',
+    firstVisit: 'زيارتك الأولى'
   }
 } as const;
 
@@ -152,9 +158,13 @@ export const dayFromDate = (ymd: string, lang: Lang) => dayLabel(`${ymd}T12:00:0
 export const dateTimeLabel = (iso: string, lang: Lang) =>
   `${dayLabel(iso, lang)}${lang === 'ar' ? '، ' : ', '}${timeLabel(iso, lang)}`;
 
-export function priceLabel(qar: number, lang: Lang): string {
-  const n = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(qar);
-  return lang === 'ar' ? `${n} ر.ق` : `${n} QAR`;
+/* 100 QAR · 100 QAR — pay at the gym (src/lib/payment.ts, shared with the server) */
+export function priceLabel(qar: number, lang: Lang, pay?: { pay_at_venue?: boolean | null; category?: string | null }): string {
+  return priceText({ price_qar: qar, pay_at_venue: pay?.pay_at_venue, category: pay?.category }, lang);
+}
+
+export function payNote(qar: number, lang: Lang, pay: { pay_at_venue?: boolean | null; category?: string | null }): string | null {
+  return paymentNote({ price_qar: qar, pay_at_venue: pay.pay_at_venue, category: pay.category }, lang);
 }
 
 export const durationLabel = (min: number, lang: Lang) => (lang === 'ar' ? `${min} دقيقة` : `${min} min`);

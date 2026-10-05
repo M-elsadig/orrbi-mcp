@@ -5,6 +5,7 @@ import { db } from '../lib/supabase.js';
 import { fail, guard, ok } from '../lib/results.js';
 import { languageInput } from '../lib/language.js';
 import { WINDOW_DAYS, buildWeek } from '../lib/availability.js';
+import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
 import { WIDGET_URI } from '../widget.js';
 import { TZ_LABEL, addDays, isRealDate, qatarDayRange, todayInQatar } from '../lib/time.js';
 
@@ -49,6 +50,12 @@ export function registerGetAvailability(server: McpServer) {
         service_name_ar: z.string().nullable().optional(),
         service_id: z.string().optional(),
         price_qar: z.number().optional(),
+        price_label: z.string().optional(),
+        payment: z.string().optional(),
+        cancellation_policy: z.string().optional(),
+        pay_at_venue: z.boolean().optional(),
+        category: z.string().optional(),
+        ladies_only: z.boolean().optional(),
         duration_min: z.number().optional(),
         date: z.string(),
         requested_date: z.string().optional(),
@@ -73,8 +80,9 @@ export function registerGetAvailability(server: McpServer) {
       if (date < today) return fail(`${date} is in the past. Today in Qatar is ${today}; please pick today or a later date.`);
 
       const [biz, svc] = await Promise.all([
-        db().from('businesses').select('id,name_en,name_ar').eq('id', business_id).eq('is_active', true).maybeSingle(),
-        db().from('services').select('id,name_en,name_ar,duration_min,price,business_id')
+        db().from('businesses').select('id,name_en,name_ar,category,pay_at_venue,cancellation_hours')
+          .eq('id', business_id).eq('is_active', true).maybeSingle(),
+        db().from('services').select('id,name_en,name_ar,duration_min,price,business_id,bookable,ladies_only')
           .eq('id', service_id).eq('is_active', true).maybeSingle()
       ]);
       if (biz.error) throw biz.error;
@@ -84,6 +92,12 @@ export function registerGetAvailability(server: McpServer) {
       if (!svc.data || svc.data.business_id !== business_id) {
         return fail(`That service is not offered by ${biz.data.name_en}. Use search_businesses to see its current services and their service_ids.`);
       }
+      if (!svc.data.bookable) {
+        return fail(`${svc.data.name_en} at ${biz.data.name_en} can't be booked through Orrbi yet. ` +
+          `Tell the user to arrange it with ${biz.data.name_en} directly, or offer one of its classes instead.`);
+      }
+
+      const pay = { price_qar: Number(svc.data.price), pay_at_venue: biz.data.pay_at_venue, category: biz.data.category };
 
       /* the whole week in one query: the card switches days without asking again */
       const from = qatarDayRange(date).from;
@@ -114,6 +128,9 @@ export function registerGetAvailability(server: McpServer) {
       const answer = {
         business_name: bizName,
         service_name: svcName,
+        price_label: priceText(pay),
+        ...(paymentNote(pay) ? { payment: paymentNote(pay)! } : {}),
+        ...(cancellationText(biz.data.cancellation_hours) ? { cancellation_policy: cancellationText(biz.data.cancellation_hours)! } : {}),
         date: week.date,
         timezone: TZ_LABEL,
         slots: week.slots,
@@ -128,6 +145,9 @@ export function registerGetAvailability(server: McpServer) {
         service_id,
         service_name_ar: svc.data.name_ar || null,
         price_qar: Number(svc.data.price),
+        pay_at_venue: Boolean(biz.data.pay_at_venue),
+        category: biz.data.category,
+        ladies_only: Boolean(svc.data.ladies_only),
         duration_min: Number(svc.data.duration_min),
         requested_date: date,
         days: week.days

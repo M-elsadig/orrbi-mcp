@@ -1,5 +1,6 @@
 import { qatarLabelAr } from './time.js';
 import { actionRow } from './telegramActions.js';
+import { cancellationText, paymentNote, priceText } from './payment.js';
 
 /* Ping the owner on Telegram when an MCP booking comes in. Best effort, like
    the n8n webhook: a Telegram failure is logged and never fails the booking.
@@ -15,20 +16,52 @@ export type BookingAlert = {
   business_name: string;
   service_name: string;
   price_qar: number | null;
+  pay_at_venue?: boolean;
+  category?: string | null;
   starts_at: string;
   start_label: string;
   customer_name: string;
   customer_phone: string;   // +974XXXXXXXX
   notes: string | null;
+  cancellation_hours?: number | null;        // what the customer is told
+  venue_cancellation_hours?: number | null;  // what the business needs
+  first_visit_note_ar?: string | null;
+  booking_contact?: { name: string | null; phone: string } | null;   // who the owner calls to book
 };
 
+type WhatsAppFields = Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'> &
+  Partial<Pick<BookingAlert, 'price_qar' | 'pay_at_venue' | 'category' | 'cancellation_hours' | 'first_visit_note_ar'>>;
+
 /* wa.me wants the number without +, and the text URL-encoded. The prefilled
-   message is the one the owner sends once the business has confirmed. */
-export function whatsappLink(b: Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'>): string {
-  const message =
+   message is the one the owner sends once the business has confirmed: the
+   confirmation, then where to pay, the cancellation window and the
+   first-visit note, each only when known. */
+export function whatsappLink(b: WhatsAppFields): string {
+  const pay = b.price_qar == null ? null : paymentNote({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category }, 'ar');
+  const cancel = cancellationText(b.cancellation_hours, 'ar');
+  const message = [
     `مرحبا ${b.customer_name}، حجزك في ${b.business_name} يوم ${qatarLabelAr(b.starts_at)} ` +
-    `تم تأكيده ✅ رقم الحجز: ${b.reference}`;
+    `تم تأكيده ✅ رقم الحجز: ${b.reference}`,
+    ...(pay ? [`💳 ${pay}`] : []),
+    ...(cancel ? [`⏰ ${cancel}`] : []),
+    ...(b.first_visit_note_ar ? [`📍 ${b.first_visit_note_ar}`] : [])
+  ].join('\n');
   return `https://wa.me/${b.customer_phone.replace(/^\+/, '')}?text=${encodeURIComponent(message)}`;
+}
+
+/* "Book via: Irish (reception) +97477708678" (Telegram makes the number tappable) */
+function contactLine(c: BookingAlert['booking_contact']): string | null {
+  if (!c) return null;
+  return `Book via: ${c.name ? `${c.name} ` : ''}${c.phone}`;
+}
+
+function cancelLine(b: BookingAlert): string | null {
+  if (b.cancellation_hours == null && b.venue_cancellation_hours == null) return null;
+  const parts = [
+    b.cancellation_hours != null ? `customer told ${b.cancellation_hours}h` : null,
+    b.venue_cancellation_hours != null ? `business needs ${b.venue_cancellation_hours}h` : null
+  ].filter(Boolean);
+  return `Cancellation: ${parts.join(', ')}`;
 }
 
 /* Resolves to null when the alert went out, else why it didn't, so the
@@ -45,10 +78,11 @@ export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
     `Business: ${b.business_name}`,
     `Service: ${b.service_name}`,
     `When: ${b.start_label} (Qatar time)`,
-    `Price: ${b.price_qar == null ? 'unknown' : `${b.price_qar} QAR`}`,
+    `Price: ${b.price_qar == null ? 'unknown' : priceText({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category })}`,
     `Customer: ${b.customer_name}`,
     `Phone: ${b.customer_phone}`,
     ...(b.notes ? [`Notes: ${b.notes}`] : []),
+    ...[contactLine(b.booking_contact), cancelLine(b)].filter((l): l is string => Boolean(l)),
     '',
     `WhatsApp: ${wa}`,
     '',

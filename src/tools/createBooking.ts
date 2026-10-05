@@ -7,7 +7,8 @@ import { reportError } from '../lib/errors.js';
 import { PHONE_MESSAGE, normalizeQatarPhone } from '../lib/phone.js';
 import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
-import { notifyTelegram } from '../lib/telegram.js';
+import { notifyTelegram, sendTelegram } from '../lib/telegram.js';
+import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
 import { WIDGET_URI } from '../widget.js';
 import { languageInput } from '../lib/language.js';
 
@@ -33,6 +34,18 @@ const DB_ERRORS: Record<string, string> = {
     'This request_id was already used for a different booking. Use a new request_id for a new booking.'
 };
 
+/* After this many no-shows a number can't book through Orrbi. */
+export const NO_SHOW_LIMIT = 2;
+
+/* Polite, and says what to do. ORRBI_SUPPORT_WHATSAPP (+974...) adds a link. */
+export function blockedMessage(support = process.env.ORRBI_SUPPORT_WHATSAPP): string {
+  const digits = support?.replace(/\D/g, '');
+  const contact = digits ? ` on WhatsApp at https://wa.me/${digits}` : '';
+  return 'Sorry, this number can\'t book through Orrbi right now because of missed bookings. ' +
+    `Please contact the Orrbi team${contact} and we'll sort it out. ` +
+    'Tell the user this kindly; do not retry the booking.';
+}
+
 type Booked = {
   booking_id: string;
   reference: string;
@@ -51,13 +64,15 @@ export function registerCreateBooking(server: McpServer) {
       title: 'Request a booking',
       description:
         'Request a booking for one slot at a business in Qatar. The booking is created as pending: the business still has to confirm it, ' +
-        'and the customer then gets a WhatsApp confirmation. ' +
+        'and the customer then gets a WhatsApp confirmation. Orrbi never takes payment: when the result has a payment line, ' +
+        'the customer pays at the business; say so, and never say they paid or will pay through Orrbi. ' +
         'BEFORE calling this tool you MUST read back to the user, and get their explicit "yes" to, all of: ' +
-        'the business name, the service, the date and time (Qatar time, from get_availability start_label), ' +
+        'the business name, the service, the date and time (Qatar time, from get_availability start_label), the price as price_label gives it, ' +
         'the customer\'s name, and their Qatar mobile number. Never call it on a guess or without that confirmation. ' +
         'Use business_id/service_id from search_businesses and slot_id from get_availability; never invent ids. ' +
         'Generate a request_id (e.g. a UUID) for each new booking and send the same request_id if you retry, so the booking is not made twice. ' +
         'If the slot is full, call get_availability again and offer other times. ' +
+        'After booking, pass on the payment line, the cancellation policy and the first-visit note from the result. ' +
         'If the card already reported a booking through model context, it is done: do not call this again for it.',
       inputSchema: {
         business_id: z.uuid('business_id must be the id returned by search_businesses')
@@ -88,6 +103,14 @@ export function registerCreateBooking(server: McpServer) {
         service_name_ar: z.string().nullable().optional(),
         start: z.string(),
         start_label: z.string(),
+        price_label: z.string().optional(),
+        payment: z.string().optional(),
+        cancellation_policy: z.string().optional(),
+        first_visit: z.string().optional(),
+        price_qar: z.number().nullable().optional(),
+        pay_at_venue: z.boolean().optional(),
+        category: z.string().nullable().optional(),
+        first_visit_ar: z.string().nullable().optional(),
         message: z.string()
       },
       annotations: {
@@ -109,6 +132,29 @@ export function registerCreateBooking(server: McpServer) {
 
       const owner = process.env.ORRBI_MCP_USER_ID;
       if (!owner) return unexpected('create_booking.config', new Error('ORRBI_MCP_USER_ID is not set'));
+
+      /* what the checks, the confirmation and the alert need. Best effort:
+         if it fails the booking still goes ahead, with plainer wording */
+      const ctx = await bookingContext(args.business_id, args.service_id);
+      if (ctx.bookable === false) {
+        return fail(`${ctx.service_name ?? 'That service'} can't be booked through Orrbi yet. ` +
+          'Tell the user to arrange it with the business directly, or offer one of its classes instead.');
+      }
+
+      /* customers pay at the gym, so a no-show costs the business a spot:
+         after NO_SHOW_LIMIT of them the number can't book any more */
+      const noShows = await noShowCount(phone);
+      if (noShows >= NO_SHOW_LIMIT) {
+        await sendTelegram([
+          '🚫 Blocked booking attempt (no-shows)',
+          '',
+          `Customer: ${args.customer_name}`,
+          `Phone: ${phone}`,
+          `No-shows: ${noShows}`,
+          `Wanted: ${ctx.service_name ?? args.service_id} at ${ctx.business_name ?? args.business_id}`
+        ].join('\n'));
+        return fail(blockedMessage());
+      }
 
       const params = {
         p_owner_id: owner,
@@ -140,10 +186,8 @@ export function registerCreateBooking(server: McpServer) {
 
       const start = toQatarIso(row.starts_at);
       const startLabel = qatarLabel(row.starts_at);
-
-      /* Arabic names for the UI and the price for the alert. Capped and best
-         effort, so it can't hold the booking up for long or throw. */
-      const extra = await serviceDetails(args.business_id, args.service_id);
+      const pay = ctx.price == null ? null : { price_qar: ctx.price, pay_at_venue: ctx.pay_at_venue, category: ctx.category };
+      const priceLabel = pay ? priceText(pay) : null;
 
       /* a retried request_id already notified everyone the first time.
          Neither notification can throw. */
@@ -159,7 +203,9 @@ export function registerCreateBooking(server: McpServer) {
             business_name: row.business_name,
             service_id: args.service_id,
             service_name: row.service_name,
-            price_qar: extra.price,
+            price_qar: ctx.price,
+            price_label: priceLabel,
+            pay_at_venue: ctx.pay_at_venue,
             slot_id: args.slot_id,
             start,
             start_label: startLabel,
@@ -172,12 +218,18 @@ export function registerCreateBooking(server: McpServer) {
             reference: row.reference,
             business_name: row.business_name,
             service_name: row.service_name,
-            price_qar: extra.price,
+            price_qar: ctx.price,
+            pay_at_venue: ctx.pay_at_venue,
+            category: ctx.category,
             starts_at: row.starts_at,
             start_label: startLabel,
             customer_name: args.customer_name,
             customer_phone: phone,
-            notes: args.notes || null
+            notes: args.notes || null,
+            cancellation_hours: ctx.cancellation_hours,
+            venue_cancellation_hours: ctx.venue_cancellation_hours,
+            first_visit_note_ar: ctx.first_visit_note_ar,
+            booking_contact: ctx.booking_contact
           })
         ]);
 
@@ -189,6 +241,9 @@ export function registerCreateBooking(server: McpServer) {
         }
       }
 
+      const payment = pay ? paymentNote(pay) : null;
+      const cancellation = cancellationText(ctx.cancellation_hours);
+
       const answer = {
         booking_id: row.booking_id,
         reference: row.reference,
@@ -197,36 +252,102 @@ export function registerCreateBooking(server: McpServer) {
         service_name: row.service_name,
         start,
         start_label: startLabel,
-        message:
-          `Your booking request for ${row.service_name} at ${row.business_name} on ${startLabel} (Qatar time) has been sent ` +
-          `and is pending. You'll get a WhatsApp confirmation once ${row.business_name} confirms it. Reference: ${row.reference}.`
+        ...(priceLabel ? { price_label: priceLabel } : {}),
+        ...(payment ? { payment } : {}),
+        ...(cancellation ? { cancellation_policy: cancellation } : {}),
+        ...(ctx.first_visit_note_en ? { first_visit: ctx.first_visit_note_en } : {}),
+        message: [
+          `Your booking request for ${row.service_name} at ${row.business_name} on ${startLabel} (Qatar time) has been sent and is pending.`,
+          `You'll get a WhatsApp confirmation once ${row.business_name} confirms it.`,
+          payment,
+          cancellation,
+          ctx.first_visit_note_en ? `First visit: ${ctx.first_visit_note_en}` : null,
+          `Reference: ${row.reference}.`
+        ].filter(Boolean).join(' ')
       };
 
-      /* Arabic names for the UI only; the text answer is unchanged, and the
-         phone is in neither */
-      return ok({ ...answer, business_name_ar: extra.business_ar, service_name_ar: extra.service_ar }, answer);
+      /* the card also gets Arabic text and what it needs to label the price;
+         the phone is in neither */
+      return ok({
+        ...answer,
+        business_name_ar: ctx.business_name_ar,
+        service_name_ar: ctx.service_name_ar,
+        price_qar: ctx.price,
+        pay_at_venue: ctx.pay_at_venue,
+        category: ctx.category,
+        first_visit_ar: ctx.first_visit_note_ar
+      }, answer);
     }, args)
   );
 }
 
-/* Best effort: the booking is already made, so a failed lookup just means
-   the Arabic UI shows the English names and the alert says the price is
-   unknown. */
-async function serviceDetails(businessId: string, serviceId: string):
-  Promise<{ business_ar: string | null; service_ar: string | null; price: number | null }> {
+/* Best effort: a failed lookup must not stop a booking. */
+async function noShowCount(phone: string): Promise<number> {
+  try {
+    const { data, error } = await db().rpc('mcp_no_show_count', { p_customer_phone: phone })
+      .abortSignal(AbortSignal.timeout(2000));
+    if (error) throw error;
+    return Number(data) || 0;
+  } catch (e) {
+    await reportError('create_booking.no_show_check', e, {}, { ping: false });
+    return 0;
+  }
+}
+
+type BookingContext = {
+  bookable: boolean | null;
+  business_name: string | null;
+  business_name_ar: string | null;
+  service_name: string | null;
+  service_name_ar: string | null;
+  category: string | null;
+  price: number | null;
+  pay_at_venue: boolean;
+  cancellation_hours: number | null;
+  venue_cancellation_hours: number | null;
+  first_visit_note_en: string | null;
+  first_visit_note_ar: string | null;
+  booking_contact: { name: string | null; phone: string } | null;
+};
+
+/* Everything about the business and service the booking needs beyond what
+   create_guest_booking returns. The booking contact comes from
+   business_private, which only the service role can read: it goes to the
+   owner's Telegram alert, never to the customer. */
+async function bookingContext(businessId: string, serviceId: string): Promise<BookingContext> {
   try {
     const signal = AbortSignal.timeout(2000);
-    const [b, s] = await Promise.all([
-      db().from('businesses').select('name_ar').eq('id', businessId).abortSignal(signal).maybeSingle(),
-      db().from('services').select('name_ar,price').eq('id', serviceId).abortSignal(signal).maybeSingle()
+    const [b, s, p] = await Promise.all([
+      db().from('businesses')
+        .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,first_visit_note_en,first_visit_note_ar')
+        .eq('id', businessId).abortSignal(signal).maybeSingle(),
+      db().from('services').select('name_en,name_ar,price,bookable').eq('id', serviceId).abortSignal(signal).maybeSingle(),
+      db().from('business_private').select('booking_contact_name,booking_contact_phone')
+        .eq('business_id', businessId).abortSignal(signal).maybeSingle()
     ]);
     const price = s.data?.price;
     return {
-      business_ar: b.data?.name_ar || null,
-      service_ar: s.data?.name_ar || null,
-      price: price == null || price === '' ? null : Number(price)
+      bookable: s.data ? Boolean(s.data.bookable) : null,
+      business_name: b.data?.name_en ?? null,
+      business_name_ar: b.data?.name_ar || null,
+      service_name: s.data?.name_en ?? null,
+      service_name_ar: s.data?.name_ar || null,
+      category: b.data?.category ?? null,
+      price: price == null || price === '' ? null : Number(price),
+      pay_at_venue: Boolean(b.data?.pay_at_venue),
+      cancellation_hours: b.data?.cancellation_hours ?? null,
+      venue_cancellation_hours: b.data?.venue_cancellation_hours ?? null,
+      first_visit_note_en: b.data?.first_visit_note_en || null,
+      first_visit_note_ar: b.data?.first_visit_note_ar || null,
+      booking_contact: p.data?.booking_contact_phone
+        ? { name: p.data.booking_contact_name ?? null, phone: p.data.booking_contact_phone }
+        : null
     };
   } catch {
-    return { business_ar: null, service_ar: null, price: null };
+    return {
+      bookable: null, business_name: null, business_name_ar: null, service_name: null, service_name_ar: null,
+      category: null, price: null, pay_at_venue: false, cancellation_hours: null, venue_cancellation_hours: null,
+      first_visit_note_en: null, first_visit_note_ar: null, booking_contact: null
+    };
   }
 }

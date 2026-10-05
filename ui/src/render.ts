@@ -3,7 +3,7 @@ import type { Choice, DetailsForm } from './flow';
 import { type BookingErrorKind, type FieldErrors, validateDetails } from './booking';
 import {
   type Lang, type Period, categoryLabel, dateTimeLabel, dayChip, dayFromDate, dayLabel, durationLabel, periodOf, pick,
-  priceLabel, qatarDate, strings, timeLabel
+  payNote, priceLabel, qatarDate, strings, timeLabel
 } from './i18n';
 
 /* Every step of the card is built here as a detached element; the
@@ -94,7 +94,7 @@ function businessCard(b: Business, lang: Lang, onPick?: (b: Business) => void): 
         ? h('ul', { class: 'services' },
             ...shown.map((s) => h('li', {},
               h('span', { class: 'svc-name' }, pick(s.name, s.name_ar, lang)),
-              h('span', { class: 'svc-meta' }, `${priceLabel(s.price_qar, lang)} · ${durationLabel(s.duration_min, lang)}`)
+              h('span', { class: 'svc-meta' }, `${priceLabel(s.price_qar, lang, { pay_at_venue: s.pay_at_venue, category: b.category })} · ${durationLabel(s.duration_min, lang)}`)
             )),
             extra > 0 ? h('li', { class: 'more' }, t.moreServices(extra)) : null
           )
@@ -163,7 +163,7 @@ export function viewServices(b: Business, lang: Lang, onBack: (() => void) | und
           h('span', { class: 'svc-title' }, pick(s.name, s.name_ar, lang)),
           h('span', { class: 'svc-sub' }, durationLabel(s.duration_min, lang))
         ),
-        h('span', { class: 'svc-price' }, priceLabel(s.price_qar, lang)),
+        h('span', { class: 'svc-price' }, priceLabel(s.price_qar, lang, { pay_at_venue: s.pay_at_venue, category: b.category })),
         h('span', { class: 'chev fwd', 'aria-hidden': 'true' })
       );
       btn.addEventListener('click', () => onPick(s.service_id));
@@ -364,7 +364,7 @@ export function viewDetails(s: DetailsState, lang: Lang, on: DetailsHandlers): H
 
   const row = (label: string, value: string) => h('div', { class: 'row' }, h('dt', {}, label), h('dd', {}, value));
   const priceDur = [
-    c.price_qar !== undefined ? priceLabel(c.price_qar, lang) : null,
+    c.price_qar !== undefined ? priceLabel(c.price_qar, lang, c) : null,
     c.duration_min !== undefined ? durationLabel(c.duration_min, lang) : null
   ].filter(Boolean).join(' · ');
 
@@ -454,6 +454,7 @@ export function viewBooked(r: BookingResult, lang: Lang): HTMLElement {
   const t = strings(lang);
   const business = pick(r.business_name, r.business_name_ar, lang);
   const service = pick(r.service_name, r.service_name_ar, lang);
+  const firstVisit = lang === 'ar' ? r.first_visit_ar || r.first_visit : r.first_visit;
 
   /* only these fields, by design: never the customer's phone */
   const row = (label: string, value: string, cls = '') =>
@@ -467,9 +468,13 @@ export function viewBooked(r: BookingResult, lang: Lang): HTMLElement {
     h('dl', { class: 'rows' },
       row(t.service, service),
       row(t.when, dateTimeLabel(r.start, lang)),
-      row(t.reference, r.reference, 'ref')
+      row(t.reference, r.reference, 'ref'),
+      r.price_qar != null ? row(t.price, priceLabel(r.price_qar, lang, r)) : null
     ),
-    h('p', { class: 'caption foot' }, t.awaiting(business))
+    h('p', { class: 'caption foot' }, t.awaiting(business)),
+    /* pay-at-venue: say where the money goes, so nobody looks for a checkout */
+    r.price_qar != null && r.pay_at_venue ? h('p', { class: 'caption' }, payNote(r.price_qar, lang, r)) : null,
+    firstVisit ? h('p', { class: 'caption' }, `${t.firstVisit}: ${firstVisit}`) : null
   );
 }
 

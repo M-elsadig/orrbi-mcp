@@ -61,7 +61,8 @@ test('a step keeps what it loaded when you come back to it', () => {
 test('choice carries ids, names and price', () => {
   assert.deepEqual(choiceFor(gym, 's2'), {
     business_id: 'b1', business_name: 'Falcon Gym', business_name_ar: 'نادي الصقر',
-    service_id: 's2', service_name: 'CrossFit class', service_name_ar: 'كروسفت جماعي', price_qar: 80, duration_min: 60
+    service_id: 's2', service_name: 'CrossFit class', service_name_ar: 'كروسفت جماعي', price_qar: 80, duration_min: 60,
+    pay_at_venue: undefined, category: 'gym'
   });
   assert.equal(choiceFor(gym, 'nope'), null);
   assert.equal(choiceFromAvailability({ business_name: 'a', service_name: 'b', date: 'd', slots: [] }), null);
