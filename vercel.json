@@ -5,11 +5,13 @@
       "src": "api/mcp.ts",
       "use": "@vercel/node",
       "config": { "includeFiles": ["ui/dist/**"] }
-    }
+    },
+    { "src": "api/telegram.ts", "use": "@vercel/node" }
   ],
   "routes": [
     { "src": "/mcp/?", "dest": "/api/mcp.ts" },
     { "src": "/api/mcp/?", "dest": "/api/mcp.ts" },
-    { "src": "/chatgpt/mcp/?", "dest": "/api/mcp.ts?ui=chatgpt" }
+    { "src": "/chatgpt/mcp/?", "dest": "/api/mcp.ts?ui=chatgpt" },
+    { "src": "/telegram/?", "dest": "/api/telegram.ts" }
   ]
 }

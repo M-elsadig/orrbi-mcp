@@ -16,7 +16,8 @@
     "vercel-build": "npm run build:ui",
     "test": "tsx --test test/*.test.ts",
     "create-system-user": "tsx --env-file=.env scripts/create-system-user.ts",
-    "inspector": "npx @modelcontextprotocol/inspector"
+    "inspector": "npx @modelcontextprotocol/inspector",
+    "set-telegram-webhook": "tsx --env-file=.env scripts/set-telegram-webhook.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",

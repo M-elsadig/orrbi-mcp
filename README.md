@@ -206,6 +206,22 @@ curl -s -o /dev/null -w "%{http_code}\n" https://<project>.vercel.app/mcp -H "Or
   -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+## Telegram alert buttons
+
+Each new-booking alert has **✅ Confirmed** and **❌ Couldn't book**. Book in the business's own app, then tap one:
+
+- ✅ sets the booking `pending → confirmed`, and the alert keeps a button with the prefilled WhatsApp confirmation for the customer.
+- ❌ sets `pending → failed` (frees the slot), and the button becomes a plain WhatsApp chat so you can contact the customer.
+
+Either way the alert is edited to show the outcome and when, and the ✅/❌ buttons disappear. A tap only acts on MCP bookings that are still `pending`; a second tap, or a booking changed in the app meanwhile, changes nothing and says so. Every change is logged to `booking_events` by the existing audit trigger.
+
+Taps reach `POST /telegram` (`src/telegramWebhook.ts`). Only Telegram can call it: the bot's webhook is registered with a secret derived from the bot token, which Telegram sends back in a header. Only taps from `TELEGRAM_CHAT_ID` count. Register the webhook once after deploying:
+
+```bash
+npm run set-telegram-webhook                 # → https://orrbi-mcp.vercel.app/telegram
+npm run set-telegram-webhook -- '?remove'    # to use getUpdates again
+```
+
 ## Errors
 
 An unexpected failure answers *"Something went wrong on our side (error ref E-XXXXXX)"*. The cause is in three places:

@@ -168,6 +168,7 @@ export function registerCreateBooking(server: McpServer) {
             notes: args.notes || null
           }),
           notifyTelegram({
+            booking_id: row.booking_id,
             reference: row.reference,
             business_name: row.business_name,
             service_name: row.service_name,

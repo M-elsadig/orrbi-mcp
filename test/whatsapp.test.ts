@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { whatsappLink } from '../src/lib/telegram.js';
 
 const alert = {
+  booking_id: '00000000-0000-4000-8000-000000000000',
   reference: 'ATO-KX4CTS',
   business_name: 'Falcon Gym',
   service_name: 'CrossFit class',

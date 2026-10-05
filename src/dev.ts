@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { handleMcp } from './http.js';
+import { handleTelegram } from './telegramWebhook.js';
 
 /* Local stand-in for Vercel: same handler, served at http://localhost:3000/mcp */
 
@@ -10,6 +11,11 @@ createServer((req, res) => {
 
   if (path === '/mcp' || path === '/chatgpt/mcp') {
     void handleMcp(req, res);
+    return;
+  }
+
+  if (path === '/telegram') {
+    void handleTelegram(req, res);
     return;
   }
 
