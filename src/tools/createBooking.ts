@@ -107,6 +107,7 @@ export function registerCreateBooking(server: McpServer) {
         payment: z.string().optional(),
         cancellation_policy: z.string().optional(),
         first_visit: z.string().optional(),
+        ladies_only: z.boolean().optional(),
         price_qar: z.number().nullable().optional(),
         pay_at_venue: z.boolean().optional(),
         category: z.string().nullable().optional(),
@@ -135,10 +136,21 @@ export function registerCreateBooking(server: McpServer) {
 
       /* what the checks, the confirmation and the alert need. Best effort:
          if it fails the booking still goes ahead, with plainer wording */
-      const ctx = await bookingContext(args.business_id, args.service_id);
+      const ctx = await bookingContext(args.business_id, args.service_id, args.slot_id);
       if (ctx.bookable === false) {
         return fail(`${ctx.service_name ?? 'That service'} can't be booked through Orrbi yet. ` +
           'Tell the user to arrange it with the business directly, or offer one of its classes instead.');
+      }
+
+      /* the business needs its cancellation window to confirm a request, so
+         nothing starting sooner than that can be booked (get_availability
+         doesn't offer those either) */
+      if (ctx.slot_starts_at && ctx.cancellation_hours) {
+        const lead = new Date(ctx.slot_starts_at).getTime() - Date.now();
+        if (lead > 0 && lead < ctx.cancellation_hours * 3_600_000) {
+          return fail(`That time starts in less than ${ctx.cancellation_hours} hours, too soon to book through Orrbi: ` +
+            `${ctx.business_name ?? 'the business'} needs time to confirm. Call get_availability again and offer the user a later time.`);
+        }
       }
 
       /* customers pay at the gym, so a no-show costs the business a spot:
@@ -229,7 +241,8 @@ export function registerCreateBooking(server: McpServer) {
             cancellation_hours: ctx.cancellation_hours,
             venue_cancellation_hours: ctx.venue_cancellation_hours,
             first_visit_note_ar: ctx.first_visit_note_ar,
-            booking_contact: ctx.booking_contact
+            booking_contact: ctx.booking_contact,
+            ladies_only: ctx.slot_ladies_only
           })
         ]);
 
@@ -256,8 +269,9 @@ export function registerCreateBooking(server: McpServer) {
         ...(payment ? { payment } : {}),
         ...(cancellation ? { cancellation_policy: cancellation } : {}),
         ...(ctx.first_visit_note_en ? { first_visit: ctx.first_visit_note_en } : {}),
+        ...(ctx.slot_ladies_only ? { ladies_only: true } : {}),
         message: [
-          `Your booking request for ${row.service_name} at ${row.business_name} on ${startLabel} (Qatar time) has been sent and is pending.`,
+          `Your booking request for ${row.service_name}${ctx.slot_ladies_only ? ' (ladies-only class)' : ''} at ${row.business_name} on ${startLabel} (Qatar time) has been sent and is pending.`,
           `You'll get a WhatsApp confirmation once ${row.business_name} confirms it.`,
           payment,
           cancellation,
@@ -308,22 +322,25 @@ type BookingContext = {
   first_visit_note_en: string | null;
   first_visit_note_ar: string | null;
   booking_contact: { name: string | null; phone: string } | null;
+  slot_starts_at: string | null;
+  slot_ladies_only: boolean;
 };
 
 /* Everything about the business and service the booking needs beyond what
    create_guest_booking returns. The booking contact comes from
    business_private, which only the service role can read: it goes to the
    owner's Telegram alert, never to the customer. */
-async function bookingContext(businessId: string, serviceId: string): Promise<BookingContext> {
+async function bookingContext(businessId: string, serviceId: string, slotId: string): Promise<BookingContext> {
   try {
     const signal = AbortSignal.timeout(2000);
-    const [b, s, p] = await Promise.all([
+    const [b, s, p, a] = await Promise.all([
       db().from('businesses')
         .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,first_visit_note_en,first_visit_note_ar')
         .eq('id', businessId).abortSignal(signal).maybeSingle(),
       db().from('services').select('name_en,name_ar,price,bookable').eq('id', serviceId).abortSignal(signal).maybeSingle(),
       db().from('business_private').select('booking_contact_name,booking_contact_phone')
-        .eq('business_id', businessId).abortSignal(signal).maybeSingle()
+        .eq('business_id', businessId).abortSignal(signal).maybeSingle(),
+      db().from('availability').select('starts_at,ladies_only').eq('id', slotId).abortSignal(signal).maybeSingle()
     ]);
     const price = s.data?.price;
     return {
@@ -341,13 +358,16 @@ async function bookingContext(businessId: string, serviceId: string): Promise<Bo
       first_visit_note_ar: b.data?.first_visit_note_ar || null,
       booking_contact: p.data?.booking_contact_phone
         ? { name: p.data.booking_contact_name ?? null, phone: p.data.booking_contact_phone }
-        : null
+        : null,
+      slot_starts_at: a.data?.starts_at ?? null,
+      slot_ladies_only: Boolean(a.data?.ladies_only)
     };
   } catch {
     return {
       bookable: null, business_name: null, business_name_ar: null, service_name: null, service_name_ar: null,
       category: null, price: null, pay_at_venue: false, cancellation_hours: null, venue_cancellation_hours: null,
-      first_visit_note_en: null, first_visit_note_ar: null, booking_contact: null
+      first_visit_note_en: null, first_visit_note_ar: null, booking_contact: null,
+      slot_starts_at: null, slot_ladies_only: false
     };
   }
 }

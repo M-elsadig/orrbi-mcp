@@ -269,15 +269,17 @@ export function viewTimes(
 
   function timeChip(s: Slot, date: string): HTMLElement {
     const time = timeLabel(s.start, lang);
-    const few = s.spots_left <= 2;
+    /* no "N left": Orrbi doesn't know the real count (the business also
+       books in its own system). Ladies-only is per time, so it's on the chip. */
+    const ladies = s.ladies_only;
     const isChosen = chosen === s.slot_id;
     const btn = h('button', {
       class: `time${isChosen ? ' chosen' : ''}`,
       type: 'button',
       disabled: (chosen !== null && !isChosen) || busy,
       'aria-pressed': isChosen ? 'true' : undefined,
-      'aria-label': few ? `${time}, ${t.left(s.spots_left)}` : time
-    }, time, few ? h('span', { class: 'few' }, t.left(s.spots_left)) : null);
+      'aria-label': ladies ? `${time}, ${t.ladiesOnly}` : time
+    }, time, ladies ? h('span', { class: 'tag' }, t.ladiesOnly) : null);
 
     btn.addEventListener('click', async () => {
       if (mode.kind === 'open') return mode.onPick(s, date);

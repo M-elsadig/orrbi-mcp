@@ -27,6 +27,7 @@ export type BookingAlert = {
   venue_cancellation_hours?: number | null;  // what the business needs
   first_visit_note_ar?: string | null;
   booking_contact?: { name: string | null; phone: string } | null;   // who the owner calls to book
+  ladies_only?: boolean;
 };
 
 type WhatsAppFields = Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'> &
@@ -76,7 +77,7 @@ export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
     '',
     `Ref: ${b.reference}`,
     `Business: ${b.business_name}`,
-    `Service: ${b.service_name}`,
+    `Service: ${b.service_name}${b.ladies_only ? ' (LADIES ONLY)' : ''}`,
     `When: ${b.start_label} (Qatar time)`,
     `Price: ${b.price_qar == null ? 'unknown' : priceText({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category })}`,
     `Customer: ${b.customer_name}`,

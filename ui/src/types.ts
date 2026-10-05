@@ -8,7 +8,6 @@ export type Service = {
   duration_min: number;
   price_qar: number;
   pay_at_venue?: boolean;
-  ladies_only?: boolean;
 };
 
 export type Business = {
@@ -24,7 +23,7 @@ export type Business = {
 
 export type SearchResult = { businesses: Business[]; count: number; note?: string };
 
-export type Slot = { slot_id: string; start: string; end: string; start_label: string; spots_left: number };
+export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only?: boolean };
 
 export type Day = { date: string; slots: Slot[] };
 

@@ -7,6 +7,7 @@ import { coverImage } from '../lib/images.js';
 import { languageInput } from '../lib/language.js';
 import { categoryOf, resolveCategory } from '../lib/category.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
+import { type TemplateRow, weeklyTimes } from '../lib/schedule.js';
 import { WIDGET_URI } from '../widget.js';
 
 const serviceOut = z.object({
@@ -17,7 +18,9 @@ const serviceOut = z.object({
   duration_min: z.number(),
   price_qar: z.number(),
   price_label: z.string().optional(),
-  ladies_only: z.boolean().optional(),
+  /* "Sun 8:30 AM (ladies only), 5:15 PM; Tue …" from the weekly timetable */
+  weekly_times: z.string().optional(),
+  has_ladies_only_times: z.boolean().optional(),
   pay_at_venue: z.boolean().optional()
 });
 
@@ -52,7 +55,6 @@ type ServiceRow = {
   description_en: string | null;
   duration_min: number;
   price: number | string;
-  ladies_only: boolean;
   bookable: boolean;
   price_note_en: string | null;
 };
@@ -86,6 +88,7 @@ export function registerSearchBusinesses(server: McpServer) {
         'All filters are optional. Use the returned business_id and service_id with get_availability. ' +
         'Quote prices with price_label: when it says "pay at the gym", the customer pays there and Orrbi only reserves the spot. ' +
         'other_services are for information only and cannot be booked through Orrbi. ' +
+        'weekly_times is the regular timetable of each class (Qatar time), so you can tell which class runs on which day; ladies-only is per time, marked "(ladies only)". ' +
         'Never invent ids, prices or businesses. If nothing matches, say so and offer to search with fewer filters. ' +
         'After showing results, ask which business and service the user wants; do not check availability for every business or service.',
       inputSchema: {
@@ -96,7 +99,7 @@ export function registerSearchBusinesses(server: McpServer) {
         query: z.string().trim().min(1).max(100).optional()
           .describe('Free text matched against business names and descriptions, e.g. a business the user named.'),
         ladies_only: z.boolean().optional()
-          .describe('true to return only ladies-only (women-only) classes, e.g. when the user asks for classes for women. Omit otherwise.'),
+          .describe('true to return only classes that have ladies-only (women-only) times, with only those times in weekly_times. Use when the user asks for ladies or women classes. Omit otherwise.'),
         limit: z.number().int().min(1).max(10).default(5)
           .describe('How many businesses to return. Default 5, max 10.'),
         language: languageInput
@@ -120,7 +123,7 @@ export function registerSearchBusinesses(server: McpServer) {
         .from('businesses')
         .select('id,name_en,name_ar,category,area,address,description_en,maps_url,pay_at_venue,cancellation_hours,' +
           'first_visit_note_en,images,' +
-          'services(id,name_en,name_ar,description_en,duration_min,price,ladies_only,bookable,price_note_en)')
+          'services(id,name_en,name_ar,description_en,duration_min,price,bookable,price_note_en)')
         .eq('is_active', true)
         .eq('services.is_active', true)
         .order('name_en', { ascending: true })
@@ -141,14 +144,31 @@ export function registerSearchBusinesses(server: McpServer) {
       const { data, error } = await q;
       if (error) throw error;
 
+      const found = (data ?? []) as unknown as Row[];
+
+      /* the weekly timetable of every class found, in one query */
+      const timetable = new Map<string, TemplateRow[]>();
+      if (found.length) {
+        const t = await db().from('schedule_templates')
+          .select('service_id,weekday,start_time,ladies_only,bookable')
+          .in('business_id', found.map((b) => b.id))
+          .eq('is_active', true);
+        if (t.error) throw t.error;
+        for (const r of (t.data ?? []) as (TemplateRow & { service_id: string })[]) {
+          timetable.set(r.service_id, [...(timetable.get(r.service_id) ?? []), r]);
+        }
+      }
+      const hasLadies = (serviceId: string) => (timetable.get(serviceId) ?? []).some((r) => r.bookable && r.ladies_only);
+
       /* bookable services become `services`; info-only ones `other_services`.
-         With ladies_only, only ladies-only classes count, and a business
-         without any drops out. */
-      const rows = ((data ?? []) as unknown as Row[]).map((b) => {
-        const all = (b.services ?? []).slice().sort((x, y) => Number(x.ladies_only) - Number(y.ladies_only) || x.name_en.localeCompare(y.name_en));
+         Ladies-only is per time, not per class: with ladies_only, a class
+         counts if it has ladies-only times, and a business without any
+         drops out. */
+      const rows = found.map((b) => {
+        const all = (b.services ?? []).slice().sort((x, y) => x.name_en.localeCompare(y.name_en));
         return {
           b,
-          bookable: all.filter((s) => s.bookable && (!ladies_only || s.ladies_only)),
+          bookable: all.filter((s) => s.bookable && (!ladies_only || hasLadies(s.id))),
           info: ladies_only ? [] : all.filter((s) => !s.bookable)
         };
       }).filter((r) => !ladies_only || r.bookable.length);
@@ -171,7 +191,10 @@ export function registerSearchBusinesses(server: McpServer) {
           duration_min: Number(s.duration_min),
           price_qar: Number(s.price),
           price_label: priceText({ price_qar: Number(s.price), pay_at_venue: b.pay_at_venue, category: b.category }),
-          ladies_only: s.ladies_only
+          ...(timetable.has(s.id) ? {
+            weekly_times: weeklyTimes(timetable.get(s.id)!, ladies_only ? true : undefined) ?? undefined,
+            has_ladies_only_times: hasLadies(s.id)
+          } : {})
         })),
         ...(info.length ? {
           other_services: info.map((s) => ({

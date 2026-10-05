@@ -55,7 +55,8 @@ export type BookingErrorKind = 'slotGone' | 'duplicate' | 'tooMany' | 'phone' | 
 
 export function classifyBookingError(text: string): { kind: BookingErrorKind; retime: boolean } {
   const t = text.toLowerCase();
-  if (t.includes('fully booked') || t.includes('already passed') || t.includes('does not exist') || t.includes('different business or service')) {
+  if (t.includes('fully booked') || t.includes('already passed') || t.includes('does not exist') || t.includes('different business or service') ||
+      t.includes('too soon to book')) {
     return { kind: 'slotGone', retime: true };
   }
   if (t.includes('already has a booking for that exact time')) return { kind: 'duplicate', retime: false };

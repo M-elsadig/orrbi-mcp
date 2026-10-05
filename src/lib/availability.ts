@@ -5,9 +5,12 @@ import { addDays, qatarLabel, todayInQatar, toQatarIso } from './time.js';
 
 export const WINDOW_DAYS = 7;
 
-export type SlotRow = { id: string; starts_at: string; capacity: number; booked_count: number };
+export type SlotRow = { id: string; starts_at: string; capacity: number; booked_count: number; ladies_only?: boolean | null };
 
-export type Slot = { slot_id: string; start: string; end: string; start_label: string; spots_left: number };
+/* No spot count: partners also take bookings in their own systems, so
+   Orrbi's count isn't the real one, and every booking is a request the
+   business confirms. Capacity only decides whether a slot is offered. */
+export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only: boolean };
 
 export type Day = { date: string; slots: Slot[] };
 
@@ -19,16 +22,29 @@ export type Week = {
   slots: Slot[];
 };
 
-export function buildWeek(rows: SlotRow[], requested: string, durationMin: number, now: number): Week {
+export type WeekOptions = {
+  /* true: only ladies-only slots; false: only mixed; undefined: both */
+  ladiesOnly?: boolean;
+  /* don't offer slots starting sooner than this (the business's
+     cancellation window), so it has time to confirm */
+  minLeadMs?: number;
+};
+
+export const LADIES_SUFFIX = ' · Ladies only';
+
+export function buildWeek(rows: SlotRow[], requested: string, durationMin: number, now: number, opts: WeekOptions = {}): Week {
   const days: Day[] = Array.from({ length: WINDOW_DAYS }, (_, i) => ({ date: addDays(requested, i), slots: [] }));
   const byDate = new Map(days.map((d) => [d.date, d]));
   const durationMs = durationMin * 60_000;
+  const earliest = now + (opts.minLeadMs ?? 0);
 
   const sorted = [...rows].sort((a, b) => a.starts_at.localeCompare(b.starts_at));
   for (const r of sorted) {
     const start = new Date(r.starts_at);
-    const left = Number(r.capacity) - Number(r.booked_count);
-    if (start.getTime() <= now || left <= 0) continue;
+    const ladies = Boolean(r.ladies_only);
+    if (start.getTime() <= earliest) continue;
+    if (Number(r.capacity) - Number(r.booked_count) <= 0) continue;
+    if (opts.ladiesOnly !== undefined && ladies !== opts.ladiesOnly) continue;
 
     const day = byDate.get(todayInQatar(start));   // the slot's Qatar calendar date
     if (!day) continue;
@@ -36,8 +52,10 @@ export function buildWeek(rows: SlotRow[], requested: string, durationMin: numbe
       slot_id: r.id,
       start: toQatarIso(start),
       end: toQatarIso(new Date(start.getTime() + durationMs)),
-      start_label: qatarLabel(start),
-      spots_left: left
+      /* the label the model reads out carries "Ladies only", so a
+         ladies-only time can't be offered without saying so */
+      start_label: qatarLabel(start) + (ladies ? LADIES_SUFFIX : ''),
+      ladies_only: ladies
     });
   }
 

@@ -44,9 +44,40 @@ test('days are Qatar calendar days, not UTC ones', () => {
   assert.equal(w.days[1].slots[0].slot_id, 'x');
 });
 
-test('spots_left and order', () => {
+test('in time order, with no spot counts', () => {
   const w = buildWeek([row('late', '2026-10-04T15:00:00Z', 5, 3), row('early', '2026-10-04T06:00:00Z')], '2026-10-04', 60, NOW);
-  assert.deepEqual(w.slots.map((s) => [s.slot_id, s.spots_left]), [['early', 5], ['late', 2]]);
+  assert.deepEqual(w.slots.map((s) => s.slot_id), ['early', 'late']);
+  assert.ok(w.slots.every((s) => !('spots_left' in s)));
+});
+
+/* Aflete Tuesday: Lower Body & Core is ladies-only at 8:30 AM and 4:00 PM, mixed at 5:15 and 6:30 PM */
+const tuesday = [
+  { ...row('l0830', '2026-10-06T05:30:00Z', 16), ladies_only: true },
+  { ...row('l1600', '2026-10-06T13:00:00Z', 16), ladies_only: true },
+  { ...row('m1715', '2026-10-06T14:15:00Z', 16), ladies_only: false },
+  { ...row('m1830', '2026-10-06T15:30:00Z', 16), ladies_only: false }
+];
+const MON = Date.parse('2026-10-05T13:30:00Z');   // Mon 5 Oct, 4:30 PM Qatar
+
+test('ladies-only is per slot: filter either way, or both with the label saying so', () => {
+  const ids = (o?: boolean) => buildWeek(tuesday, '2026-10-06', 60, MON, { ladiesOnly: o }).slots.map((s) => s.slot_id);
+  assert.deepEqual(ids(true), ['l0830', 'l1600']);
+  assert.deepEqual(ids(false), ['m1715', 'm1830']);
+  assert.deepEqual(ids(undefined), ['l0830', 'l1600', 'm1715', 'm1830']);
+
+  const both = buildWeek(tuesday, '2026-10-06', 60, MON).slots;
+  assert.equal(both[0].start_label, 'Tue 6 Oct, 8:30 AM · Ladies only');
+  assert.equal(both[0].ladies_only, true);
+  assert.equal(both[2].start_label, 'Tue 6 Oct, 5:15 PM');
+  assert.equal(both[2].ladies_only, false);
+});
+
+test('nothing inside the cancellation window is offered', () => {
+  const lead = (h: number) => buildWeek(tuesday, '2026-10-06', 60, Date.parse('2026-10-06T10:00:00Z'), { minLeadMs: h * 3_600_000 })
+    .slots.map((s) => s.slot_id);
+  /* now = Tue 1:00 PM Qatar; 4h → only 5:15 PM onwards (4:00 PM is 3h away) */
+  assert.deepEqual(lead(4), ['m1715', 'm1830']);
+  assert.deepEqual(lead(0), ['l1600', 'm1715', 'm1830']);
 });
 
 test('morning / afternoon / evening by Qatar hour', () => {

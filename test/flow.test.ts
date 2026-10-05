@@ -11,7 +11,7 @@ const gym: Business = {
     { service_id: 's2', name: 'CrossFit class', name_ar: 'كروسفت جماعي', duration_min: 60, price_qar: 80 }
   ]
 };
-const slot: Slot = { slot_id: 'x1', start: '2026-10-08T19:00:00+03:00', end: '2026-10-08T20:00:00+03:00', start_label: 'Thu 8 Oct, 7:00 PM', spots_left: 5 };
+const slot: Slot = { slot_id: 'x1', start: '2026-10-08T19:00:00+03:00', end: '2026-10-08T20:00:00+03:00', start_label: 'Thu 8 Oct, 7:00 PM', ladies_only: false };
 const booking: BookingResult = {
   booking_id: 'bk', reference: 'ATO-AB12CD', status: 'pending', business_name: 'Falcon Gym', service_name: 'CrossFit class',
   start: slot.start, start_label: slot.start_label

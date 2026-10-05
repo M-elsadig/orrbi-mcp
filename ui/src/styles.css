@@ -371,9 +371,9 @@ button.card.tappable:active { transform: scale(0.985); }
 }
 /* compact to look at, 44px to hit: the tap area reaches past the chip */
 .time::after { content: ""; position: absolute; inset: -4px -3px; }
-.time .few { color: var(--color-text-warning); font-size: var(--font-text-xs-size); font-weight: var(--font-weight-normal); }
+.time .tag { color: var(--color-text-warning); font-size: var(--font-text-xs-size); font-weight: var(--font-weight-normal); }
 .time.chosen { background: var(--color-background-inverse); border-color: var(--color-background-inverse); color: var(--color-text-inverse); }
-.time.chosen .few { color: inherit; opacity: 0.75; }
+.time.chosen .tag { color: inherit; opacity: 0.75; }
 .time:disabled:not(.chosen) { opacity: 0.4; cursor: default; }
 
 /* instant press feedback, on pointer-down */
