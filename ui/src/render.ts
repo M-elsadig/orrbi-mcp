@@ -1,9 +1,10 @@
-import type { AvailabilityResult, BookingResult, Business, Day, SearchResult, Slot, ToolName } from './types';
-import type { Choice, DetailsForm } from './flow';
+import type { AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Slot, ToolName } from './types';
+import { type Choice, type DetailsForm, type GymStep, classesAt, shownDay, slotsByDay, timesOn } from './flow';
 import { type BookingErrorKind, type FieldErrors, validateDetails } from './booking';
+import { cancellationText } from '../../src/lib/payment.js';
 import {
-  type Lang, type Period, categoryLabel, dateTimeLabel, dayChip, dayFromDate, dayLabel, durationLabel, periodOf, pick,
-  payNote, priceLabel, qatarDate, strings, timeLabel
+  type Lang, type Period, clockLabel, dateTimeLabel, dayChip, dayFromDate, dayLabel, durationLabel, periodOf, pick,
+  payNote, priceLabel, qatarDate, strings, timeLabel, weekdayName, windowTitle
 } from './i18n';
 
 /* Every step of the card is built here as a detached element; the
@@ -42,9 +43,7 @@ function header(lang: Lang, onBack: (() => void) | undefined, title: string, sub
   );
 }
 
-/* ── Places ─────────────────────────────────────────────────────────────── */
-
-const MAX_SERVICES = 3;
+/* ── Shared bits ────────────────────────────────────────────────────────── */
 
 /* a stable hue per business, so its initial keeps its colour between calls */
 function hueFor(text: string): number {
@@ -63,110 +62,323 @@ function initial(englishName: string, cls: string): HTMLElement {
   return el;
 }
 
-function photo(b: Business, name: string, cls = 'photo'): HTMLElement {
-  if (!b.image_url) return initial(b.name, cls);
-  const img = h('img', { class: cls, src: b.image_url, alt: cls === 'photo' ? name : '', loading: 'lazy', decoding: 'async' });
-  /* a missing or blocked photo falls back to the initial, never a broken icon */
-  img.addEventListener('error', () => img.replaceWith(initial(b.name, cls)), { once: true });
+/* "From 100 QAR" on the compact card: no "pay at the gym" there, that is
+   said on the gym page and at the review step */
+function fromLabel(qar: number | null | undefined, lang: Lang, pay?: { pay_at_venue?: boolean; category?: string }): string | null {
+  if (qar == null) return null;
+  return strings(lang).fromPrice(priceLabel(qar, lang, pay));
+}
+
+const LADIES_MARK = '♀';
+
+/* "Women only", small, beside a class */
+const ladiesTag = (lang: Lang) => h('span', { class: 'tag ladies' }, strings(lang).womenOnly);
+
+/* ── Cards: one compact card per gym, in a carousel ─────────────────────── */
+
+export type CardsHandlers = {
+  /* open the gym page, with a time preselected when a chip was tapped */
+  onOpen?: (g: GymCard, start?: string) => void;
+  /* no tool calls from the card: a chip becomes a chat message */
+  onChat?: (g: GymCard, x: NextTime) => void;
+};
+
+/* Photo, name, area, "From 100 QAR" and the next 3 times that answer the
+   question. No class list, no price per row: the gym page has those. */
+export function viewCards(r: CardsResult, lang: Lang, on: CardsHandlers): HTMLElement {
+  const t = strings(lang);
+  const gyms = r.gyms ?? [];
+  if (!gyms.length) return h('section', { class: 'card notice' }, h('p', {}, t.noBusinesses));
+  const today = qatarDate();
+
+  const caption = r.next
+    ? h('p', { class: 'cards-caption' }, t.nextTimesInstead)
+    : r.timed ? h('p', { class: 'cards-caption' }, windowTitle({ ...r, days: r.days ?? 1 }, lang, today)) : null;
+
+  const list = h('div', { class: gyms.length === 1 ? 'carousel single' : 'carousel', role: 'list' }, ...gyms.map((g) => {
+    const name = pick(g.name, g.name_ar, lang);
+    const price = fromLabel(g.from_price_qar, lang);
+    const inner = [
+      cover(g.image_url, g.name, 'gc-photo'),
+      h('span', { class: 'gc-body' },
+        h('span', { class: 'gc-name' }, name),
+        h('span', { class: 'gc-meta' }, [g.area, price].filter(Boolean).join(' · '))
+      )
+    ];
+    let main: HTMLElement;
+    if (on.onOpen) {
+      main = h('button', { class: 'gc-main tappable', type: 'button', 'aria-label': t.openGym(name) }, ...inner);
+      main.addEventListener('click', () => on.onOpen!(g));
+    } else {
+      main = h('div', { class: 'gc-main' }, ...inner);
+    }
+
+    const times = g.next_times ?? [];
+    const firstDay = times[0]?.date;
+    const when = times.length && firstDay !== today ? h('span', { class: 'gc-day' }, dayName(firstDay, lang, today)) : null;
+    const chips = times.length
+      ? h('div', { class: 'gc-times' }, ...times.map((x) => {
+          const time = timeLabel(x.start, lang);
+          /* a chip on another day than the first says which */
+          const label = x.date !== firstDay ? `${dayChip(x.date, lang, today).top} ${time}` : time;
+          const chip = h('button', {
+            class: x.ladies_only ? 'gc-time ladies' : 'gc-time', type: 'button',
+            'aria-label': `${dayLabel(x.start, lang)}, ${time}${x.ladies_only ? `, ${t.womenOnly}` : ''}`,
+            disabled: !on.onOpen && !on.onChat
+          }, label, x.ladies_only ? h('span', { class: 'mark', 'aria-hidden': 'true' }, LADIES_MARK) : null);
+          chip.addEventListener('click', () => (on.onOpen ? on.onOpen(g, x.start) : on.onChat?.(g, x)));
+          return chip;
+        }))
+      : h('p', { class: 'gc-none' }, r.timed ? t.noTimesThen : t.noOpenTimes);
+
+    return h('article', { class: 'card gc', role: 'listitem' }, main, h('div', { class: 'gc-foot' }, when, chips));
+  }));
+
+  return h('div', { class: 'cards' }, caption, list);
+}
+
+/* "Tomorrow", or "Wed 8 Oct" */
+function dayName(ymd: string, lang: Lang, today: string): string {
+  const { top } = dayChip(ymd, lang, today);
+  return top === strings(lang).today || top === strings(lang).tomorrow ? top : dayFromDate(ymd, lang);
+}
+
+/* a photo, or the gym's initial when it has none or it fails to load */
+function cover(src: string | null | undefined, englishName: string, cls: string): HTMLElement {
+  if (!src) return initial(englishName, cls);
+  const img = h('img', { class: cls, src, alt: '', loading: 'lazy', decoding: 'async' });
+  img.addEventListener('error', () => img.replaceWith(initial(englishName, cls)), { once: true });
   return img;
 }
 
-const metaLine = (b: Business, lang: Lang) => `${categoryLabel(b.category, lang)} · ${b.area}`;
+/* ── Gym page: the tend-app detail sheet, in the card ───────────────────── */
 
-function cheapest(b: Business): number | null {
-  const prices = b.services.map((s) => s.price_qar).filter((p) => Number.isFinite(p));
-  return prices.length ? Math.min(...prices) : null;
-}
+export type GymHandlers = {
+  onBack?: () => void;
+  onDay: (date: string) => void;
+  onTime: (start: string) => void;
+  onBook: () => void;
+  onToggleHours: () => void;
+  onMaps?: (url: string) => void;
+  onRetry: () => void;
+};
 
-/* With photos: the big swipeable cards */
-function businessCard(b: Business, lang: Lang, onPick?: (b: Business) => void): HTMLElement {
-  const t = strings(lang);
-  const name = pick(b.name, b.name_ar, lang);
-  const shown = b.services.slice(0, MAX_SERVICES);
-  const extra = b.services.length - shown.length;
+const SVG = 'http://www.w3.org/2000/svg';
 
-  const body = [
-    photo(b, name),
-    h('div', { class: 'body' },
-      h('h3', { class: 'title' }, name),
-      h('p', { class: 'meta' }, metaLine(b, lang)),
-      shown.length
-        ? h('ul', { class: 'services' },
-            ...shown.map((s) => h('li', {},
-              h('span', { class: 'svc-name' }, pick(s.name, s.name_ar, lang)),
-              h('span', { class: 'svc-meta' }, `${priceLabel(s.price_qar, lang, { pay_at_venue: s.pay_at_venue, category: b.category })} · ${durationLabel(s.duration_min, lang)}`)
-            )),
-            extra > 0 ? h('li', { class: 'more' }, t.moreServices(extra)) : null
-          )
-        : null
-    )
-  ];
-  if (!onPick) return h('article', { class: 'card business', role: 'listitem' }, ...body);
-
-  const btn = h('button', { class: 'card business tappable', type: 'button', role: 'listitem', 'aria-label': name }, ...body);
-  btn.addEventListener('click', () => onPick(b));
-  return btn;
-}
-
-/* Without photos: a quiet list, one line of facts per place */
-function businessRow(b: Business, lang: Lang, onPick?: (b: Business) => void): HTMLElement {
-  const t = strings(lang);
-  const low = cheapest(b);
-  const content = [
-    initial(b.name, 'avatar'),
-    h('div', { class: 'place-text' },
-      h('span', { class: 'place-name' }, pick(b.name, b.name_ar, lang)),
-      h('span', { class: 'place-meta' }, metaLine(b, lang))
-    ),
-    low === null ? null : h('span', { class: 'place-price' }, t.from(priceLabel(low, lang))),
-    onPick ? h('span', { class: 'chev fwd', 'aria-hidden': 'true' }) : null
-  ];
-  if (!onPick) return h('li', { class: 'place' }, ...content);
-
-  const btn = h('button', { class: 'place tappable', type: 'button' }, ...content);
-  btn.addEventListener('click', () => onPick(b));
-  return h('li', {}, btn);
-}
-
-export function viewPlaces(r: SearchResult, lang: Lang, onPick?: (b: Business) => void): HTMLElement {
-  const t = strings(lang);
-  const list = r.businesses ?? [];
-  if (!list.length) return h('section', { class: 'card notice' }, h('p', {}, t.noBusinesses));
-
-  /* big cards only earn their space when there is a real photo to show */
-  if (list.some((b) => b.image_url)) {
-    return h('div', { class: list.length === 1 ? 'carousel single' : 'carousel', role: 'list' },
-      ...list.map((b) => businessCard(b, lang, onPick)));
+/* the app's map pin, drawn in currentColor */
+function pin(): SVGElement {
+  const svg = document.createElementNS(SVG, 'svg');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('class', 'pin');
+  const p = document.createElementNS(SVG, 'path');
+  p.setAttribute('d', 'M10 17.5C10 17.5 15.5 12.6 15.5 8.5A5.5 5.5 0 0 0 4.5 8.5C4.5 12.6 10 17.5 10 17.5Z');
+  const c = document.createElementNS(SVG, 'circle');
+  c.setAttribute('cx', '10');
+  c.setAttribute('cy', '8.4');
+  c.setAttribute('r', '2');
+  for (const el of [p, c]) {
+    el.setAttribute('fill', 'none');
+    el.setAttribute('stroke', 'currentColor');
+    el.setAttribute('stroke-width', '1.4');
+    svg.append(el);
   }
-  return h('section', { class: 'card' }, h('ul', { class: 'places' }, ...list.map((b) => businessRow(b, lang, onPick))));
+  return svg;
 }
 
-/* ── Services ───────────────────────────────────────────────────────────── */
+const section = (label: string, ...body: (Node | null)[]) =>
+  h('section', { class: 'gp-sec' }, h('h4', { class: 'gp-label' }, label), ...body);
 
-export function viewServices(b: Business, lang: Lang, onBack: (() => void) | undefined, onPick: (serviceId: string) => void): HTMLElement {
+/* Photos, name, price, address; the 7 days and that day's times; classes,
+   about, class times, Maps; a sticky Book button. The card's own data shows
+   at once, the rest as it loads. */
+export function viewGymPage(step: GymStep, lang: Lang, on: GymHandlers): HTMLElement {
   const t = strings(lang);
-  const name = pick(b.name, b.name_ar, lang);
+  const g = step.card;
+  const page = step.page;
+  const name = pick(g.name, g.name_ar, lang);
+  const photos = page?.images?.length ? page.images : g.image_url ? [g.image_url] : [];
 
+  /* ── photos: swipe, with dots ── */
+  let hero: HTMLElement;
+  if (photos.length) {
+    const track = h('div', { class: 'gp-track' }, ...photos.map((src, i) => {
+      const img = h('img', { class: 'gp-shot', src, alt: i === 0 ? name : '', loading: i < 2 ? 'eager' : 'lazy', decoding: 'async' });
+      img.addEventListener('error', () => img.remove(), { once: true });
+      return img;
+    }));
+    const dots = photos.length > 1
+      ? h('div', { class: 'gp-dots', 'aria-hidden': 'true' }, ...photos.map((_, i) => h('span', { class: i === 0 ? 'on' : undefined })))
+      : null;
+    if (dots) {
+      track.addEventListener('scroll', () => {
+        const i = Math.round(Math.abs(track.scrollLeft) / Math.max(1, track.clientWidth));
+        dots.querySelectorAll('span').forEach((d, j) => d.classList.toggle('on', i === j));
+      }, { passive: true });
+    }
+    hero = h('div', { class: 'gp-hero' }, track, dots);
+  } else {
+    hero = h('div', { class: 'gp-hero' }, initial(g.name, 'gp-shot'));
+  }
+  if (on.onBack) {
+    const back = backButton(lang, on.onBack);
+    back.classList.add('gp-back');
+    hero.append(back);
+  }
+
+  const pay = { pay_at_venue: page?.pay_at_venue ?? g.pay_at_venue, category: g.category };
+  const price = fromLabel(page?.from_price_qar ?? g.from_price_qar, lang, pay);
+  const head = h('header', { class: 'gp-head' },
+    h('h2', { class: 'gp-name' }, name),
+    price ? h('p', { class: 'gp-price' }, price) : null,
+    h('p', { class: 'gp-where' }, pin(), h('span', {}, page?.address || g.area))
+  );
+
+  let body: HTMLElement[];
+  if (step.error) {
+    const retry = h('button', { class: 'btn secondary', type: 'button' }, t.tryAgain);
+    retry.addEventListener('click', on.onRetry);
+    body = [h('p', { class: 'meta' }, t.loadFailed), retry];
+  } else if (!page) {
+    body = [
+      h('div', { class: 'gp-sec', 'aria-busy': 'true' },
+        h('div', { class: 'sk w30' }),
+        h('div', { class: 'days' }, ...Array.from({ length: 7 }, () => h('div', { class: 'day sk' }))),
+        h('div', { class: 'gp-grid' }, ...Array.from({ length: 8 }, () => h('div', { class: 'gp-slot sk' })))),
+      h('div', { class: 'gp-sec' }, h('div', { class: 'sk w40' }), h('div', { class: 'sk w80' }), h('div', { class: 'sk w70' }))
+    ];
+  } else {
+    body = gymBody(step, page, lang, on);
+  }
+
+  /* the sticky bar: what will be booked, or what to do first */
+  let bar: HTMLElement | null = null;
+  if (page) {
+    const picked = !!step.time && classesAt(page, step.time).length > 0;
+    const book = h('button', { class: 'btn accent', type: 'button', disabled: !picked },
+      picked ? t.bookAt(timeLabel(step.time!, lang)) : t.bookNow);
+    book.addEventListener('click', () => { if (picked) on.onBook(); });
+    bar = h('div', { class: 'gp-bar' },
+      picked ? null : h('p', { class: 'caption', role: 'status' }, step.time ? t.timeGone : t.pickTimeFirst),
+      book);
+  }
+
+  return h('article', { class: 'gp' }, hero, h('div', { class: 'gp-body' }, head, ...body), bar);
+}
+
+function gymBody(step: GymStep, page: GymPage, lang: Lang, on: GymHandlers): HTMLElement[] {
+  const t = strings(lang);
+  const today = qatarDate();
+  const byDay = slotsByDay(page);
+  const day = shownDay(page, step.day);
+  const out: HTMLElement[] = [];
+
+  /* ── available: 7 day chips, that day's times ── */
+  if (!day) {
+    out.push(section(t.available, h('p', { class: 'empty' }, t.noClassesWeek)));
+  } else {
+    const dates = Array.from({ length: page.week.days }, (_, i) => plusDays(page.week.date, i));
+    const strip = h('div', { class: 'days', role: 'tablist' }, ...dates.map((d) => {
+      const { top, num } = dayChip(d, lang, today);
+      const empty = !byDay.get(d)?.length;
+      const isOn = d === day;
+      const chip = h('button', {
+        class: `day${isOn ? ' on' : ''}`, type: 'button', role: 'tab', 'aria-selected': isOn ? 'true' : 'false',
+        'aria-label': dayLabel(`${d}T12:00:00+03:00`, lang), disabled: empty
+      }, h('span', { class: 'day-top' }, top), h('span', { class: 'day-num' }, num));
+      chip.addEventListener('click', () => { if (!empty && !isOn) on.onDay(d); });
+      return chip;
+    }));
+    requestAnimationFrame(() => revealSelected(strip));
+
+    const grid = h('div', { class: 'gp-grid' }, ...timesOn(page, day).map((x) => {
+      const time = timeLabel(x.start, lang);
+      const isOn = step.time === x.start;
+      const btn = h('button', {
+        class: `gp-slot${isOn ? ' on' : ''}${x.ladies_only ? ' ladies' : ''}`, type: 'button',
+        'aria-pressed': isOn ? 'true' : 'false', 'aria-label': x.ladies_only ? `${time}, ${t.womenOnly}` : time
+      }, h('span', {}, time), x.ladies_only ? h('span', { class: 'gp-slot-tag' }, `${LADIES_MARK} ${t.womenOnly}`) : null);
+      btn.addEventListener('click', () => on.onTime(x.start));
+      return btn;
+    }));
+    out.push(section(t.available, strip, grid));
+  }
+
+  /* ── classes: what each costs and how long; booked by time above ── */
+  if (page.services.length) {
+    out.push(section(t.classesTitle, h('ul', { class: 'gp-list' }, ...page.services.map((s) =>
+      h('li', { class: 'gp-row' },
+        h('span', { class: 'gp-row-main' },
+          h('span', { class: 'gp-row-name' }, pick(s.name, s.name_ar, lang)),
+          h('span', { class: 'gp-row-sub' }, durationLabel(s.duration_min, lang))),
+        h('span', { class: 'gp-row-price' }, priceLabel(s.price_qar, lang)))
+    ))));
+  }
+
+  const about = pick(page.description ?? '', page.description_ar, lang);
+  if (about) out.push(section(t.about, h('p', { class: 'gp-about' }, about)));
+
+  if (page.other_services.length) {
+    out.push(section(t.alsoHere, h('ul', { class: 'gp-list' }, ...page.other_services.map((s) =>
+      h('li', { class: 'gp-row' },
+        h('span', { class: 'gp-row-name' }, pick(s.name, s.name_ar, lang)),
+        h('span', { class: 'gp-row-price muted' }, s.price))
+    ))));
+  }
+
+  /* ── class times (from the timetable), collapsed like the app's Hours ── */
+  if (page.class_hours.length) {
+    const toggle = h('button', { class: 'gp-toggle', type: 'button', 'aria-expanded': step.hoursOpen ? 'true' : 'false' },
+      h('span', {}, t.classTimes), h('span', { class: `disclose${step.hoursOpen ? ' open' : ''}`, 'aria-hidden': 'true' }));
+    toggle.addEventListener('click', on.onToggleHours);
+    const rows = step.hoursOpen
+      ? h('dl', { class: 'gp-hours' }, ...page.class_hours.map((r) =>
+          h('div', { class: 'gp-hours-row' },
+            h('dt', {}, weekdayName(r.weekday, lang)),
+            h('dd', {}, r.first === r.last ? clockLabel(r.first, lang) : `${clockLabel(r.first, lang)} – ${clockLabel(r.last, lang)}`))))
+      : null;
+    out.push(h('div', { class: 'gp-sec gp-collapse' }, toggle, rows));
+  }
+
+  if (page.maps_url && on.onMaps) {
+    const maps = h('button', { class: 'btn secondary gp-maps', type: 'button' }, pin(), h('span', {}, t.openMaps));
+    maps.addEventListener('click', () => on.onMaps!(page.maps_url!));
+    out.push(maps);
+  }
+  return out;
+}
+
+function plusDays(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ── Class: which class at the time picked ──────────────────────────────── */
+
+export function viewClassPick(
+  start: string, options: ClassSlot[], lang: Lang, onBack: () => void, onPick: (s: ClassSlot) => void
+): HTMLElement {
+  const t = strings(lang);
+  const ladies = options.some((s) => s.ladies_only);
   return h('section', { class: 'card pad' },
-    h('header', { class: onBack ? 'head with-back' : 'head' },
-      onBack ? backButton(lang, onBack) : null,
-      photo(b, name, 'avatar'),
-      h('div', { class: 'head-text' },
-        h('h3', { class: 'title' }, name),
-        h('p', { class: 'meta' }, metaLine(b, lang))
-      )
-    ),
-    h('p', { class: 'group-title' }, t.pickService),
-    h('ul', { class: 'svc-list' }, ...b.services.map((s) => {
-      const btn = h('button', { class: 'svc tappable', type: 'button' },
-        h('span', { class: 'svc-text' },
-          h('span', { class: 'svc-title' }, pick(s.name, s.name_ar, lang)),
-          h('span', { class: 'svc-sub' }, durationLabel(s.duration_min, lang))
-        ),
-        h('span', { class: 'svc-price' }, priceLabel(s.price_qar, lang, { pay_at_venue: s.pay_at_venue, category: b.category })),
-        h('span', { class: 'chev fwd', 'aria-hidden': 'true' })
-      );
-      btn.addEventListener('click', () => onPick(s.service_id));
+    header(lang, onBack, t.chooseClass, dateTimeLabel(start, lang)),
+    ladies ? h('p', { class: 'women-note', role: 'note' }, `${LADIES_MARK} ${t.womenOnlyNote}`) : null,
+    h('ul', { class: 'pick-list' }, ...options.map((s) => {
+      const meta = [
+        s.duration_min !== undefined ? durationLabel(s.duration_min, lang) : null,
+        s.price_qar !== undefined ? priceLabel(s.price_qar, lang) : null
+      ].filter(Boolean).join(' · ');
+      const btn = h('button', { class: 'pick tappable', type: 'button' },
+        h('span', { class: 'pick-main' },
+          h('span', { class: 'pick-name' }, h('span', {}, pick(s.class_full || s.class, s.class_full_ar || s.class_ar, lang)),
+            s.ladies_only ? ladiesTag(lang) : null),
+          meta ? h('span', { class: 'pick-meta' }, meta) : null,
+          s.description ? h('span', { class: 'pick-desc' }, s.description) : null),
+        h('span', { class: 'chev fwd', 'aria-hidden': 'true' }));
+      btn.addEventListener('click', () => onPick(s));
       return h('li', {}, btn);
     }))
   );
@@ -339,42 +551,41 @@ export function viewTimesError(lang: Lang, onBack: (() => void) | undefined, tit
   );
 }
 
-/* ── Details: summary + name and mobile ─────────────────────────────────── */
+/* ── Details: name and mobile ───────────────────────────────────────────── */
 
-export type DetailsState = {
-  choice: Choice;
-  slot: Slot;
-  form: DetailsForm;
-  fieldErrors: FieldErrors;
-  error?: BookingErrorKind;
-  retime?: boolean;
-  busy?: boolean;
-};
+export type DetailsState = { choice: Choice; slot: Slot; form: DetailsForm; fieldErrors: FieldErrors };
 
 export type DetailsHandlers = {
   onBack: () => void;
   onInput: (form: DetailsForm) => void;
   onSubmit: (form: DetailsForm) => void;
-  onRetime: () => void;
 };
+
+/* the facts of the request, the same on the details and review steps */
+function summaryRows(c: Choice, slot: Slot, lang: Lang, full: boolean): HTMLElement {
+  const t = strings(lang);
+  const row = (label: string, value: string) => h('div', { class: 'row' }, h('dt', {}, label), h('dd', {}, value));
+  const business = pick(c.business_name, c.business_name_ar, lang);
+  const service = pick(c.service_name, c.service_name_ar, lang);
+  const when = dateTimeLabel(slot.start, lang) + (slot.ladies_only ? ` · ${t.womenOnly}` : '');
+  const price = c.price_qar !== undefined ? priceLabel(c.price_qar, lang, c) : null;
+  const cancel = c.cancellation_hours != null ? cancellationText(c.cancellation_hours, lang) : null;
+  return h('dl', { class: 'rows summary' },
+    row(t.business, business),
+    row(t.service, service + (c.duration_min !== undefined ? ` · ${durationLabel(c.duration_min, lang)}` : '')),
+    row(t.when, when),
+    price ? row(full ? t.payment : t.price, price) : null,
+    full && cancel ? row(t.cancellation, cancel) : null
+  );
+}
 
 export function viewDetails(s: DetailsState, lang: Lang, on: DetailsHandlers): HTMLElement {
   const t = strings(lang);
-  const c = s.choice;
-  const business = pick(c.business_name, c.business_name_ar, lang);
-  const service = pick(c.service_name, c.service_name_ar, lang);
-
-  const row = (label: string, value: string) => h('div', { class: 'row' }, h('dt', {}, label), h('dd', {}, value));
-  const priceDur = [
-    c.price_qar !== undefined ? priceLabel(c.price_qar, lang, c) : null,
-    c.duration_min !== undefined ? durationLabel(c.duration_min, lang) : null
-  ].filter(Boolean).join(' · ');
 
   const field = (id: 'name' | 'phone', label: string, error: string | undefined, attrs: Attrs) => {
     const input = h('input', {
       id: `f-${id}`, name: id, class: error ? 'input invalid' : 'input', value: s.form[id],
-      'aria-invalid': error ? 'true' : undefined, 'aria-describedby': error ? `e-${id}` : undefined,
-      disabled: s.busy, ...attrs
+      'aria-invalid': error ? 'true' : undefined, 'aria-describedby': error ? `e-${id}` : undefined, ...attrs
     });
     /* always present, so a check on leaving the field can fill it in place */
     const msg = h('p', { class: 'field-error', id: `e-${id}` }, error ?? '');
@@ -419,44 +630,68 @@ export function viewDetails(s: DetailsState, lang: Lang, on: DetailsHandlers): H
     if (!nameF.msg.hidden && !validateDetails(read()).errors.name) show(nameF, undefined);
   });
 
-  const confirm = h('button', { class: 'btn primary', type: 'submit', disabled: s.busy }, s.busy ? t.booking : t.confirm);
   const form = h('form', { class: 'details', novalidate: true },
     nameF.el,
     phoneF.el,
-    s.error
-      ? h('div', { class: 'form-error', role: 'alert' }, h('p', {}, t.bookErrors[s.error]))
-      : null,
-    s.retime ? (() => {
-      const b = h('button', { class: 'btn secondary', type: 'button' }, t.pickAnother);
-      b.addEventListener('click', on.onRetime);
-      return b;
-    })() : confirm,
+    h('button', { class: 'btn accent', type: 'submit' }, t.continue),
     h('p', { class: 'caption' }, t.privacy)
   );
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    if (!s.busy) on.onSubmit(read());
+    on.onSubmit(read());
   });
 
   return h('section', { class: 'card pad' },
-    header(lang, s.busy ? undefined : on.onBack, t.yourDetails),
-    h('dl', { class: 'rows summary' },
-      row(t.business, business),
-      row(t.service, service),
-      row(t.when, dateTimeLabel(s.slot.start, lang)),
-      priceDur ? row(t.price, priceDur) : null
-    ),
+    header(lang, on.onBack, t.yourDetails),
+    s.slot.ladies_only ? h('p', { class: 'women-note', role: 'note' }, `${LADIES_MARK} ${t.womenOnlyNote}`) : null,
+    summaryRows(s.choice, s.slot, lang, false),
     form
   );
 }
 
-/* ── Booked ─────────────────────────────────────────────────────────────── */
+/* ── Review: everything once more, then the request ─────────────────────── */
 
-export function viewBooked(r: BookingResult, lang: Lang): HTMLElement {
+export type ReviewState = {
+  choice: Choice; slot: Slot; name: string; phone: string;
+  error?: BookingErrorKind; retime?: boolean; busy?: boolean;
+};
+
+export function viewReview(s: ReviewState, lang: Lang, on: { onBack: () => void; onSend: () => void; onRetime: () => void }): HTMLElement {
+  const t = strings(lang);
+  const business = pick(s.choice.business_name, s.choice.business_name_ar, lang);
+  const row = (label: string, value: string, cls = '') => h('div', { class: 'row' }, h('dt', {}, label), h('dd', { class: cls }, value));
+
+  let action: HTMLElement;
+  if (s.retime) {
+    action = h('button', { class: 'btn secondary', type: 'button' }, t.pickAnother);
+    action.addEventListener('click', on.onRetime);
+  } else {
+    action = h('button', { class: 'btn accent', type: 'button', disabled: s.busy }, s.busy ? t.sending : t.sendRequest);
+    action.addEventListener('click', () => { if (!s.busy) on.onSend(); });
+  }
+
+  return h('section', { class: 'card pad' },
+    header(lang, s.busy ? undefined : on.onBack, t.reviewTitle),
+    s.slot.ladies_only ? h('p', { class: 'women-note', role: 'note' }, `${LADIES_MARK} ${t.womenOnlyNote}`) : null,
+    summaryRows(s.choice, s.slot, lang, true),
+    h('dl', { class: 'rows' },
+      row(t.yourName, s.name),
+      row(t.yourMobile, s.phone, 'ref')
+    ),
+    h('p', { class: 'request-note' }, t.requestNote(business)),
+    s.error ? h('div', { class: 'form-error', role: 'alert' }, h('p', {}, t.bookErrors[s.error])) : null,
+    action
+  );
+}
+
+/* ── Requested: a request, pending, never "confirmed" ───────────────────── */
+
+export function viewBooked(r: BookingResult, lang: Lang, cancellationHours?: number | null): HTMLElement {
   const t = strings(lang);
   const business = pick(r.business_name, r.business_name_ar, lang);
   const service = pick(r.service_name, r.service_name_ar, lang);
   const firstVisit = lang === 'ar' ? r.first_visit_ar || r.first_visit : r.first_visit;
+  const cancel = cancellationHours != null ? cancellationText(cancellationHours, lang) : lang === 'en' ? r.cancellation_policy ?? null : null;
 
   /* only these fields, by design: never the customer's phone */
   const row = (label: string, value: string, cls = '') =>
@@ -464,18 +699,19 @@ export function viewBooked(r: BookingResult, lang: Lang): HTMLElement {
 
   return h('section', { class: 'card pad booking' },
     h('header', { class: 'head' },
-      h('span', { class: 'badge pending' }, h('span', { class: 'dot', 'aria-hidden': 'true' }), t.pending),
-      h('h3', { class: 'title' }, business)
+      h('span', { class: 'badge pending' }, h('span', { class: 'dot', 'aria-hidden': 'true' }), t.notConfirmed),
+      h('h3', { class: 'title' }, t.requestSent)
     ),
+    h('p', { class: 'meta' }, t.awaiting(business)),
     h('dl', { class: 'rows' },
+      row(t.business, business),
       row(t.service, service),
       row(t.when, dateTimeLabel(r.start, lang)),
-      row(t.reference, r.reference, 'ref'),
-      r.price_qar != null ? row(t.price, priceLabel(r.price_qar, lang, r)) : null
+      row(t.reference, r.reference, 'ref')
     ),
-    h('p', { class: 'caption foot' }, t.awaiting(business)),
     /* pay-at-venue: say where the money goes, so nobody looks for a checkout */
     r.price_qar != null && r.pay_at_venue ? h('p', { class: 'caption' }, payNote(r.price_qar, lang, r)) : null,
+    cancel ? h('p', { class: 'caption' }, cancel) : null,
     firstVisit ? h('p', { class: 'caption' }, `${t.firstVisit}: ${firstVisit}`) : null
   );
 }
@@ -484,13 +720,11 @@ export function viewBooked(r: BookingResult, lang: Lang): HTMLElement {
 
 export function viewSkeleton(tool: ToolName | null): HTMLElement {
   const bar = (cls: string) => h('div', { class: `sk ${cls}` });
-  if (tool === 'search_businesses') {
-    return h('section', { class: 'card', 'aria-busy': 'true' }, h('ul', { class: 'places' },
-      ...[0, 1, 2].map(() => h('li', { class: 'place' },
-        h('div', { class: 'avatar sk' }),
-        h('div', { class: 'place-text' }, bar('w60'), bar('w40'))
-      ))
-    ));
+  if (tool === 'search_businesses' || tool === 'find_classes') {
+    return h('div', { class: 'carousel', 'aria-busy': 'true' }, ...[0, 1].map(() =>
+      h('div', { class: 'card gc' },
+        h('div', { class: 'gc-main' }, h('div', { class: 'gc-photo sk' }), h('div', { class: 'gc-body' }, bar('w60'), bar('w40'))),
+        h('div', { class: 'gc-foot' }, h('div', { class: 'gc-times' }, ...[0, 1, 2].map(() => h('div', { class: 'gc-time sk' })))))));
   }
   const inner = tool === 'get_availability'
     ? [bar('w50 tall'), bar('w40'),

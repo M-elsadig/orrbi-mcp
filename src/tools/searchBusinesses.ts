@@ -2,26 +2,27 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
-import { cleanText, guard, ok } from '../lib/results.js';
-import { coverImage } from '../lib/images.js';
+import { cleanText, fail, guard, ok } from '../lib/results.js';
 import { languageInput } from '../lib/language.js';
 import { categoryOf, resolveCategory } from '../lib/category.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
 import { type TemplateRow, weeklyTimes } from '../lib/schedule.js';
+import { type PartOfDay, parseClock } from '../lib/classes.js';
+import { openSlots } from '../lib/openSlots.js';
+import { DONT_REPEAT, type GymRow, gymCard, gymCardOut } from '../lib/cards.js';
+import { TZ_LABEL, isRealDate, todayInQatar } from '../lib/time.js';
 import { WIDGET_URI } from '../widget.js';
 
 const serviceOut = z.object({
   service_id: z.string(),
   name: z.string(),
-  name_ar: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   duration_min: z.number(),
   price_qar: z.number(),
   price_label: z.string().optional(),
   /* "Sun 8:30 AM (ladies only), 5:15 PM; Tue …" from the weekly timetable */
   weekly_times: z.string().optional(),
-  has_ladies_only_times: z.boolean().optional(),
-  pay_at_venue: z.boolean().optional()
+  has_ladies_only_times: z.boolean().optional()
 });
 
 /* listed so the model can answer "how much is a PT session?", never booked */
@@ -34,7 +35,6 @@ const infoServiceOut = z.object({
 const businessOut = z.object({
   business_id: z.string(),
   name: z.string(),
-  name_ar: z.string().nullable().optional(),
   category: z.string(),
   area: z.string(),
   address: z.string(),
@@ -43,7 +43,7 @@ const businessOut = z.object({
   payment: z.string().nullable().optional(),
   cancellation_policy: z.string().nullable().optional(),
   first_visit: z.string().nullable().optional(),
-  image_url: z.string().nullable().optional(),
+  next_times: z.array(z.string()).optional(),
   services: z.array(serviceOut),
   other_services: z.array(infoServiceOut).optional()
 });
@@ -56,6 +56,8 @@ type ServiceRow = {
   duration_min: number;
   price: number | string;
   bookable: boolean;
+  short_name_en: string | null;
+  short_name_ar: string | null;
   price_note_en: string | null;
 };
 
@@ -84,13 +86,16 @@ export function registerSearchBusinesses(server: McpServer) {
       description:
         'Find local businesses in Qatar that can be booked through Orrbi (gyms, barbers, salons, spas, clinics, etc.), ' +
         'with the services each one offers, their duration and price in QAR. ' +
-        'Use this first, for any request to find, browse or compare places, and to look up a business the user named. ' +
+        'Use this to find, browse or compare places, and to look up a business the user named. ' +
+        'The card shows one compact card per business with its next open times; when the user names a day or time, pass date, part_of_day or around_time so the card shows only those times. ' +
+        'For a specific class at a time across gyms ("HYCROSS Tuesday 6pm") use find_classes. ' +
+        'Do not list the businesses, classes or times again in your reply: the card shows them. ' +
         'All filters are optional. Use the returned business_id and service_id with get_availability. ' +
         'Quote prices with price_label: when it says "pay at the gym", the customer pays there and Orrbi only reserves the spot. ' +
         'other_services are for information only and cannot be booked through Orrbi. ' +
         'weekly_times is the regular timetable of each class (Qatar time), so you can tell which class runs on which day; ladies-only is per time, marked "(ladies only)". ' +
         'Never invent ids, prices or businesses. If nothing matches, say so and offer to search with fewer filters. ' +
-        'After showing results, ask which business and service the user wants; do not check availability for every business or service.',
+        'After the card, ask in one short sentence which place or time suits them; do not check availability for every business or service.',
       inputSchema: {
         category: z.string().trim().min(1).max(50).optional()
           .describe('Kind of business, e.g. "gym", "barber", "salon", "spa", "clinic". Fitness, studio, CrossFit, workout and training all mean "gym". Omit to search all.'),
@@ -100,12 +105,20 @@ export function registerSearchBusinesses(server: McpServer) {
           .describe('Free text matched against business names and descriptions, e.g. a business the user named.'),
         ladies_only: z.boolean().optional()
           .describe('true to return only classes that have ladies-only (women-only) times, with only those times in weekly_times. Use when the user asks for ladies or women classes. Omit otherwise.'),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/,'date must be YYYY-MM-DD').optional()
+          .describe('Day the user asked about, YYYY-MM-DD in Qatar time ("tonight" is today). Omit when no day was named.'),
+        days: z.number().int().min(1).max(7).optional()
+          .describe('How many days from date. Default 1 when a date or time is given, else the next 7 days.'),
+        part_of_day: z.enum(['morning', 'afternoon', 'evening', 'any']).optional()
+          .describe('morning 5 AM–12, afternoon 12–5 PM, evening 5 PM–midnight ("tonight", "after work" = evening).'),
+        around_time: z.string().regex(/^\d{1,2}:\d{2}$/,'around_time must be HH:MM (24h)').optional()
+          .describe('A time the user named, 24h HH:MM Qatar time, e.g. "18:00". Matches within 90 minutes.'),
         limit: z.number().int().min(1).max(10).default(5)
           .describe('How many businesses to return. Default 5, max 10.'),
         language: languageInput
       },
       outputSchema: {
-        businesses: z.array(businessOut),
+        gyms: z.array(gymCardOut),
         count: z.number(),
         note: z.string().optional()
       },
@@ -118,12 +131,18 @@ export function registerSearchBusinesses(server: McpServer) {
       },
       _meta: { ui: { resourceUri: WIDGET_URI } }
     },
-    async ({ category, area, query, ladies_only, limit }) => guard('search_businesses', async () => {
+    async (args) => guard('search_businesses', async () => {
+      const { category, area, query, ladies_only, limit } = args;
+      const today = todayInQatar();
+      if (args.date && !isRealDate(args.date)) return fail(`${args.date} is not a real calendar date. Please use YYYY-MM-DD.`);
+      if (args.date && args.date < today) return fail(`${args.date} is in the past. Today in Qatar is ${today}.`);
+      if (args.around_time && parseClock(args.around_time) === null) return fail('around_time must be a real 24h time, e.g. 18:00.');
+
       let q = db()
         .from('businesses')
         .select('id,name_en,name_ar,category,area,address,description_en,maps_url,pay_at_venue,cancellation_hours,' +
           'first_visit_note_en,images,' +
-          'services(id,name_en,name_ar,description_en,duration_min,price,bookable,price_note_en)')
+          'services(id,name_en,name_ar,short_name_en,short_name_ar,description_en,duration_min,price,bookable,price_note_en)')
         .eq('is_active', true)
         .eq('services.is_active', true)
         .order('name_en', { ascending: true })
@@ -173,7 +192,20 @@ export function registerSearchBusinesses(server: McpServer) {
         };
       }).filter((r) => !ladies_only || r.bookable.length);
 
-      const businesses = rows.map(({ b, bookable, info }) => ({
+      /* Answer first: the times that fit what was asked ("tonight" → only
+         tonight's), else simply the next open ones. Same rules as
+         find_classes: never within the 90-minute booking cutoff, never full. */
+      const timed = !!(args.date || args.around_time || (args.part_of_day && args.part_of_day !== 'any'));
+      const date = args.date ?? today;
+      const days = args.days ?? (timed ? 1 : 7);
+      const { slots, next } = rows.length
+        ? await openSlots(date, days, { business_ids: rows.map((r) => r.b.id) },
+          { part: args.part_of_day as PartOfDay | undefined, around: args.around_time, ladiesOnly: ladies_only }, Date.now(), timed)
+        : { slots: [], next: false };
+
+      const gyms = rows.map(({ b, bookable }) => gymCard({ ...b, services: bookable } as GymRow, slots));
+
+      const businesses = rows.map(({ b, bookable, info }, i) => ({
         business_id: b.id,
         name: b.name_en,
         category: b.category,
@@ -184,6 +216,7 @@ export function registerSearchBusinesses(server: McpServer) {
         payment: paymentNote({ pay_at_venue: b.pay_at_venue, category: b.category }),
         cancellation_policy: cancellationText(b.cancellation_hours),
         first_visit: b.first_visit_note_en,
+        next_times: gyms[i].next_times.map((t) => t.start_label),
         services: bookable.map((s) => ({
           service_id: s.id,
           name: s.name_en,
@@ -205,29 +238,29 @@ export function registerSearchBusinesses(server: McpServer) {
         } : {})
       }));
 
-      const note = businesses.length ? {} : {
-        note: ladies_only
+      const notes: string[] = [];
+      if (!businesses.length) {
+        notes.push(ladies_only
           ? 'No ladies-only classes matched. Tell the user, and offer to search mixed classes or with fewer filters.'
-          : 'No businesses matched. Tell the user, and offer to search again with fewer filters (for example without the area or category).'
-      };
+          : 'No businesses matched. Tell the user, and offer to search again with fewer filters (for example without the area or category).');
+      } else {
+        if (next) notes.push('Nothing is open at the time asked for; next_times are the next open times instead. Say so in one sentence.');
+        else if (timed && !slots.length) notes.push('Nothing is open at the time asked for. Say so, and offer another day.');
+        notes.push(DONT_REPEAT);
+      }
+      const note = notes.length ? { note: notes.join(' ') } : {};
 
-      /* the UI also gets Arabic names, the cover photo and what it needs to
-         label prices; the model's text answer stays lean */
-      const forUi = businesses.map((b, i) => ({
-        ...b,
-        name_ar: rows[i].b.name_ar || null,
-        image_url: coverImage(rows[i].b.images),
-        services: b.services.map((s, j) => ({
-          ...s,
-          name_ar: rows[i].bookable[j]?.name_ar || null,
-          pay_at_venue: rows[i].b.pay_at_venue
-        }))
-      }));
-
+      /* the card gets only what the compact card shows; the gym page loads
+         the rest itself (get_business). The model gets the details it may
+         need to answer questions. */
       return ok(
-        { businesses: forUi, count: businesses.length, ...note },
+        {
+          gyms, count: gyms.length, timezone: TZ_LABEL, date, days, timed,
+          part_of_day: args.part_of_day ?? null, around_time: args.around_time ?? null, ladies_filter: ladies_only ?? null,
+          ...(next ? { next } : {}), ...note
+        },
         { businesses, count: businesses.length, ...note }
       );
-    }, { category, area, query, ladies_only, limit })
+    }, args)
   );
 }

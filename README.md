@@ -11,7 +11,9 @@ A remote [MCP](https://modelcontextprotocol.io) server that lets AI assistants (
 
 | Tool | Annotations | What it does |
 |---|---|---|
-| `search_businesses` | read-only, closed world | Active businesses with their active services (`service_id`, name, duration, `price_qar`). Filters: `category`, `area`, `query`, `limit` (default 5, max 10). |
+| `search_businesses` | read-only, closed world | Active businesses with their active services (`service_id`, name, duration, `price_qar`) and each one's next open times. Filters: `category`, `area`, `query`, `ladies_only`, `limit` (default 5, max 10); `date` / `days` / `part_of_day` / `around_time` make the next times answer "tonight", "Tuesday 6pm". |
+| `find_classes` | read-only, closed world | Open class times across all gyms for a request with a time in it; same time filters. The card groups them by gym. |
+| `get_business` | read-only, **app only** (`visibility: ["app"]`) | The gym page the card opens: photos, about, address, Maps link, classes, info-only services, class times from the timetable, 7 days of open times. The model never sees or calls it. |
 | `get_availability` | read-only, closed world | Future slots with space left for one service on one Qatar date: `slot_id`, `start`, `end`, `start_label`, `spots_left`. |
 | `create_booking` | write, open world, not destructive | Creates a **pending** booking. It rejects full, past or mismatched slots, then POSTs to `N8N_WEBHOOK_URL` if set. |
 
@@ -34,8 +36,8 @@ In hosts that support [MCP Apps](https://github.com/modelcontextprotocol/ext-app
 
 | Tool | Widget |
 |---|---|
-| `search_businesses` | No photos: a compact list (initial, name, category · area, "from" price). With a photo: swipeable cards with services, prices and durations |
-| `get_availability` | One booking card for the next 7 days: a day strip (empty days greyed) and that day's times grouped under Morning / Afternoon / Evening ("2 left" only when 2 or fewer remain). All 7 days come with the first result, so switching days is instant. If the requested day is empty, it opens on the next day with times and says so. Tapping a time tells the model its `slot_id` (`updateModelContext`) and sends a chat message ("I want the 7:00 PM slot on Thu 8 Oct for CrossFit class at Falcon Gym."); the model still confirms name and phone before booking |
+| `search_businesses`, `find_classes` | A carousel, one compact card per gym (Google Maps style): photo, name, area, "From 100 QAR", and the next 3 open times as chips (only the asked window, e.g. tonight's; ♀ marks ladies-only). No class list. Tapping the card opens the gym page; tapping a chip opens it with that time picked. The gym page (from `get_business`) opens **fullscreen** where the host offers it (`requestDisplayMode`; Claude web and mobile do), else inline in the card. It mirrors tend-app's detail sheet: photo carousel, date chips, time grid, classes, about, class times, Open in Google Maps, sticky Book button. Booking: time → class → name + mobile → review → **request sent, pending** (never "confirmed"). Closing fullscreen returns to the carousel. The result text tells the model not to repeat the gyms or times under the card |
+| `get_availability` | One booking card for the next 7 days: a day strip (empty days greyed) and that day's times grouped under Morning / Afternoon / Evening ("2 left" only when 2 or fewer remain). All 7 days come with the first result, so switching days is instant. If the requested day is empty, it opens on the next day with times and says so. Tapping a time tells the model its `slot_id` (`updateModelContext`) and sends a chat message ("I want the 7:00 PM slot on Thu 8 Oct for BUILD X SWEAT at Aflete."); the model still confirms name and phone before booking |
 | `create_booking` | Confirmation card: **Pending** badge, business, service, Qatar date and time, reference. Never the phone |
 
 ### Booking inside the card

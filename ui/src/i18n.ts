@@ -74,7 +74,52 @@ const STRINGS = {
       blocked: 'This number can’t book through Orrbi right now because of missed bookings. Please contact the Orrbi team and we’ll sort it out.'
     },
     booked: 'Booking requested',
-    firstVisit: 'First visit'
+    firstVisit: 'First visit',
+    /* answer-first results and the gym detail */
+    /* compact cards, the gym page and the request steps */
+    fromPrice: (price: string) => `From ${price}`,
+    noTimesThen: 'Nothing open then',
+    nextTimesInstead: 'Nothing open then. Next open times:',
+    noOpenTimes: 'No open times this week',
+    openGym: (name: string) => `Open ${name}`,
+    available: 'Available',
+    classesTitle: 'Classes',
+    about: 'About',
+    classTimes: 'Class times',
+    alsoHere: 'Also here (book at the gym)',
+    openMaps: 'Open in Google Maps',
+    bookNow: 'Book now',
+    bookAt: (time: string) => `Book ${time}`,
+    pickTimeFirst: 'Pick a time above',
+    timeGone: 'That time is no longer open. Pick another.',
+    chooseClass: 'Choose your class',
+    womenOnly: 'Women only',
+    womenOnlyNote: 'This time is for women only.',
+    continue: 'Continue',
+    reviewTitle: 'Check your request',
+    payment: 'Payment',
+    cancellation: 'Cancellation',
+    sendRequest: 'Send booking request',
+    sending: 'Sending…',
+    requestNote: (b: string) => `This is a request, not a booking yet. ${b} confirms it, then you get a WhatsApp message.`,
+    requestSent: 'Booking request sent',
+    notConfirmed: 'Pending — not confirmed yet',
+    yourName: 'Name',
+    yourMobile: 'Mobile',
+    tonight: 'Tonight',
+    thisWeek: 'This week',
+    nextOpen: 'Next open classes',
+    nothingThen: 'Nothing open then. These are the next times.',
+    classes: (n: number) => (n === 1 ? '1 class' : `${n} classes`),
+    showMore: (n: number) => `Show ${n} more`,
+    perClass: (price: string) => `${price} per class`,
+    noClasses: 'No open classes for this.',
+    noClassesDay: 'No classes on this day.',
+    noClassesWeek: 'No open classes in the next 7 days.',
+    classSlotMessage: (time: string, day: string, cls: string, business: string) =>
+      `I want the ${time} ${cls} class on ${day} at ${business}.`,
+    cardTimeMessage: (time: string, day: string, business: string) =>
+      `I want a class at ${business} at ${time} on ${day}.`
   },
   ar: {
     placesFound: (n: number) => (n === 1 ? 'مكان واحد' : n === 2 ? 'مكانان' : `${n} أماكن`),
@@ -128,7 +173,50 @@ const STRINGS = {
       blocked: 'لا يمكن لهذا الرقم الحجز عبر أوربي حالياً بسبب حجوزات لم يتم حضورها. تواصل مع فريق أوربي وسنساعدك.'
     },
     booked: 'تم طلب الحجز',
-    firstVisit: 'زيارتك الأولى'
+    firstVisit: 'زيارتك الأولى',
+    fromPrice: (price: string) => `من ${price}`,
+    noTimesThen: 'لا مواعيد في هذا الوقت',
+    nextTimesInstead: 'لا مواعيد في هذا الوقت. أقرب المواعيد:',
+    noOpenTimes: 'لا مواعيد متاحة هذا الأسبوع',
+    openGym: (name: string) => `افتح ${name}`,
+    available: 'المواعيد المتاحة',
+    classesTitle: 'الحصص',
+    about: 'نبذة',
+    classTimes: 'أوقات الحصص',
+    alsoHere: 'متوفر أيضاً (الحجز في النادي)',
+    openMaps: 'افتح في خرائط Google',
+    bookNow: 'احجز الآن',
+    bookAt: (time: string) => `احجز ${time}`,
+    pickTimeFirst: 'اختر موعداً من الأعلى',
+    timeGone: 'هذا الموعد لم يعد متاحاً. اختر موعداً آخر.',
+    chooseClass: 'اختر الحصة',
+    womenOnly: 'للسيدات فقط',
+    womenOnlyNote: 'هذا الموعد للسيدات فقط.',
+    continue: 'متابعة',
+    reviewTitle: 'راجع طلبك',
+    payment: 'الدفع',
+    cancellation: 'الإلغاء',
+    sendRequest: 'إرسال طلب الحجز',
+    sending: 'جارٍ الإرسال…',
+    requestNote: (b: string) => `هذا طلب وليس حجزاً بعد. يؤكده ${b} ثم تصلك رسالة واتساب.`,
+    requestSent: 'تم إرسال طلب الحجز',
+    notConfirmed: 'قيد الانتظار — لم يتم التأكيد بعد',
+    yourName: 'الاسم',
+    yourMobile: 'الجوال',
+    tonight: 'الليلة',
+    thisWeek: 'هذا الأسبوع',
+    nextOpen: 'أقرب الحصص المتاحة',
+    nothingThen: 'لا حصص في هذا الوقت. هذه أقرب المواعيد.',
+    classes: (n: number) => (n === 1 ? 'حصة واحدة' : n === 2 ? 'حصتان' : `${n} حصص`),
+    showMore: (n: number) => `عرض ${n} أخرى`,
+    perClass: (price: string) => `${price} للحصة`,
+    noClasses: 'لا حصص متاحة لهذا الطلب.',
+    noClassesDay: 'لا حصص في هذا اليوم.',
+    noClassesWeek: 'لا حصص متاحة خلال الأيام السبعة القادمة.',
+    classSlotMessage: (time: string, day: string, cls: string, business: string) =>
+      `أريد حصة ${cls} الساعة ${time} يوم ${day} في ${business}.`,
+    cardTimeMessage: (time: string, day: string, business: string) =>
+      `أريد حصة في ${business} الساعة ${time} يوم ${day}.`
   }
 } as const;
 
@@ -136,6 +224,18 @@ export type Strings = (typeof STRINGS)['en'] | (typeof STRINGS)['ar'];
 export const strings = (lang: Lang): Strings => STRINGS[lang];
 
 const intlLocale = (lang: Lang) => (lang === 'ar' ? 'ar-QA-u-nu-latn' : 'en-GB');
+
+/* "Sun" · "الأحد" for weekday 0–6 (schedule_templates.weekday, 0 = Sunday) */
+export function weekdayName(weekday: number, lang: Lang): string {
+  /* 2026-10-04 was a Sunday */
+  const at = new Date(Date.UTC(2026, 9, 4 + weekday, 12));
+  return new Intl.DateTimeFormat(intlLocale(lang), { timeZone: 'UTC', weekday: lang === 'ar' ? 'long' : 'short' }).format(at);
+}
+
+/* "17:15" → "5:15 PM" in the UI's language */
+export function clockLabel(hhmm: string, lang: Lang): string {
+  return timeLabel(`2026-10-04T${hhmm}:00+03:00`, lang);
+}
 
 /* 6:00 PM · 6:00 م */
 export function timeLabel(iso: string, lang: Lang): string {
@@ -195,6 +295,26 @@ export function dayChip(ymd: string, lang: Lang, today = qatarDate()): { top: st
     : new Intl.DateTimeFormat(intlLocale(lang), { timeZone: TZ, weekday: 'short' }).format(at);
   const num = new Intl.DateTimeFormat(intlLocale(lang), { timeZone: TZ, day: 'numeric' }).format(at);
   return { top, num };
+}
+
+/* The results header: what the answer is for. "Tonight", "Tomorrow ·
+   Morning", "Tue 7 Oct", "This week", or "Next open classes". */
+export function windowTitle(r: { date: string; days: number; part_of_day?: string | null; next?: boolean }, lang: Lang, today = qatarDate()): string {
+  const t = strings(lang);
+  if (r.next) return t.nextOpen;
+  if (r.days >= 7 && r.date === today) return t.thisWeek;
+  const part = r.part_of_day && r.part_of_day !== 'any' ? (r.part_of_day as Period) : null;
+  if (r.days > 1) return `${dayFromDate(r.date, lang)} – ${dayFromDate(addDay(r.date, r.days - 1), lang)}`;
+  if (r.date === today && part === 'evening') return t.tonight;
+  const { top } = dayChip(r.date, lang, today);
+  const day = r.date === today || r.date === addDay(today, 1) ? top : dayFromDate(r.date, lang);
+  return part ? `${day} · ${t.periods[part]}` : day;
+}
+
+function addDay(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 export type Period = 'morning' | 'afternoon' | 'evening';

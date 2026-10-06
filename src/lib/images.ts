@@ -12,7 +12,16 @@ export function imageHost(): string {
 }
 
 export function coverImage(images: unknown): string | null {
-  const first = Array.isArray(images) ? images[0] : null;
+  return Array.isArray(images) ? publicImage(images[0]) : null;
+}
+
+/* every usable photo, cover first, for the detail's photo strip */
+export function galleryImages(images: unknown, max = 8): string[] {
+  if (!Array.isArray(images)) return [];
+  return images.map(publicImage).filter((u): u is string => !!u).slice(0, max);
+}
+
+function publicImage(first: unknown): string | null {
   if (typeof first !== 'string' || !first) return null;
 
   let url: URL;

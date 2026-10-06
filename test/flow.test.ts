@@ -1,70 +1,112 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Flow, choiceFor, choiceFromAvailability } from '../ui/src/flow.js';
+import { Flow, choiceFromAvailability, classesAt, fromClass, openGym, shownDay, slotsByDay, timesOn } from '../ui/src/flow.js';
 import { bookedNote, bookingArgs, classifyBookingError, newRequestId, validateDetails } from '../ui/src/booking.js';
-import type { Business, BookingResult, Slot } from '../ui/src/types.js';
+import type { BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Slot } from '../ui/src/types.js';
 
-const gym: Business = {
-  business_id: 'b1', name: 'Falcon Gym', name_ar: 'نادي الصقر', category: 'gym', area: 'Al Sadd', address: 'Al Sadd, Doha, Qatar',
-  services: [
-    { service_id: 's1', name: 'Day pass', duration_min: 90, price_qar: 50 },
-    { service_id: 's2', name: 'CrossFit class', name_ar: 'كروسفت جماعي', duration_min: 60, price_qar: 80 }
-  ]
+const card: GymCard = {
+  business_id: 'b1', name: 'Test Gym', name_ar: 'نادي التجربة', category: 'gym', area: 'West Bay',
+  image_url: null, from_price_qar: 100, pay_at_venue: true,
+  next_times: [{ start: '2026-10-08T19:00:00+03:00', start_label: 'Thu 8 Oct, 7:00 PM', date: '2026-10-08', ladies_only: false }]
 };
+const cards: CardsResult = { gyms: [card], count: 1, date: '2026-10-08', days: 1 };
+
+const cls = (id: string, start: string, service: string, ladies = false): ClassSlot => ({
+  slot_id: id, business_id: 'b1', business_name: 'Test Gym', area: 'West Bay', service_id: service,
+  class: service.toUpperCase(), class_full: `${service.toUpperCase()} (full)`, start, start_label: start,
+  date: start.slice(0, 10), ladies_only: ladies, price_qar: 100, pay_at_venue: true, category: 'gym', duration_min: 60
+});
+
+const page: GymPage = {
+  business_id: 'b1', name: 'Test Gym', category: 'gym', area: 'West Bay', address: 'West Bay, Doha',
+  images: [], from_price_qar: 100, pay_at_venue: true, cancellation_hours: 4,
+  services: [], other_services: [], class_hours: [],
+  week: {
+    date: '2026-10-08', days: 7, slots: [
+      cls('a', '2026-10-08T08:30:00+03:00', 'bxs', true),
+      cls('b', '2026-10-08T19:00:00+03:00', 'bxs'),
+      cls('c', '2026-10-08T19:00:00+03:00', 'xfit'),
+      cls('d', '2026-10-10T18:00:00+03:00', 'hycross')
+    ]
+  }
+};
+
 const slot: Slot = { slot_id: 'x1', start: '2026-10-08T19:00:00+03:00', end: '2026-10-08T20:00:00+03:00', start_label: 'Thu 8 Oct, 7:00 PM', ladies_only: false };
 const booking: BookingResult = {
-  booking_id: 'bk', reference: 'ATO-AB12CD', status: 'pending', business_name: 'Falcon Gym', service_name: 'CrossFit class',
+  booking_id: 'bk', reference: 'ATO-AB12CD', status: 'pending', business_name: 'Test Gym', service_name: 'CrossFit class',
   start: slot.start, start_label: slot.start_label
 };
 
 /* ── step history ── */
 
-test('back walks the steps in reverse, and the first step has no back', () => {
-  const f = new Flow({ kind: 'places', search: { businesses: [gym], count: 1 } });
+test('back walks the steps in reverse, and the carousel has no back', () => {
+  const f = new Flow({ kind: 'cards', result: cards });
   assert.equal(f.canGoBack, false);
-  f.push({ kind: 'services', business: gym });
-  f.push({ kind: 'times', choice: choiceFor(gym, 's2')! });
-  assert.equal(f.current.kind as string, 'times');
+  f.push(openGym(card));
+  f.push({ kind: 'class', page, start: slot.start, options: classesAt(page, slot.start) });
+  assert.equal(f.current.kind as string, 'class');
   assert.ok(f.back());
-  assert.equal(f.current.kind as string, 'services');
+  assert.equal(f.current.kind as string, 'gym');
   assert.ok(f.back());
-  assert.equal(f.current.kind as string, 'places');
+  assert.equal(f.current.kind as string, 'cards');
   assert.equal(f.back(), false);
 });
 
-test('a card opened at times has no back', () => {
-  const f = new Flow({ kind: 'times', choice: choiceFor(gym, 's1')! });
-  assert.equal(f.canGoBack, false);
+test('closing fullscreen goes home to the carousel, but never undoes a request', () => {
+  const f = new Flow({ kind: 'cards', result: cards });
+  f.push(openGym(card));
+  f.push({ kind: 'details', ...fromClass(page.week.slots[1]), form: { name: '', phone: '' }, fieldErrors: {} });
+  f.home();
+  assert.equal(f.current.kind as string, 'cards');
+  assert.equal(f.depth, 1);
+  f.finish(booking, 4);
+  f.home();
+  assert.equal(f.current.kind as string, 'booked');
 });
 
-test('booking ends the flow: no way back to the form', () => {
-  const f = new Flow({ kind: 'places', search: { businesses: [gym], count: 1 } });
-  f.push({ kind: 'services', business: gym });
+test('a request ends the flow: no way back to the form', () => {
+  const f = new Flow({ kind: 'cards', result: cards });
+  f.push(openGym(card));
   f.finish(booking);
   assert.equal(f.current.kind as string, 'booked');
   assert.equal(f.canGoBack, false);
   assert.equal(f.depth, 1);
 });
 
-test('a step keeps what it loaded when you come back to it', () => {
-  const f = new Flow({ kind: 'times', choice: choiceFor(gym, 's2')!, data: { business_name: 'x', service_name: 'y', date: '2026-10-08', slots: [] }, selected: '2026-10-09' });
-  f.push({ kind: 'details', choice: choiceFor(gym, 's2')!, slot, day: '2026-10-08', requestId: 'r', form: { name: '', phone: '' }, fieldErrors: {} });
-  f.back();
-  const cur = f.current;
-  assert.equal(cur.kind, 'times');
-  if (cur.kind === 'times') {
-    assert.ok(cur.data);
-    assert.equal(cur.selected, '2026-10-09');
-  }
+/* ── gym page ── */
+
+test('a tapped chip opens the gym on that day with that time picked', () => {
+  const s = openGym(card, '2026-10-10T18:00:00+03:00');
+  assert.equal(s.day, '2026-10-10');
+  assert.equal(s.time, '2026-10-10T18:00:00+03:00');
+  assert.equal(openGym(card).time, undefined);
 });
 
-test('choice carries ids, names and price', () => {
-  assert.deepEqual(choiceFor(gym, 's2'), {
-    business_id: 'b1', business_name: 'Falcon Gym', business_name_ar: 'نادي الصقر',
-    service_id: 's2', service_name: 'CrossFit class', service_name_ar: 'كروسفت جماعي', price_qar: 80, duration_min: 60,
-    pay_at_venue: undefined, category: 'gym'
-  });
-  assert.equal(choiceFor(gym, 'nope'), null);
+test('days and times on the gym page', () => {
+  assert.deepEqual([...slotsByDay(page).keys()], ['2026-10-08', '2026-10-10']);
+  assert.equal(shownDay(page, '2026-10-10'), '2026-10-10');
+  assert.equal(shownDay(page, '2026-10-09'), '2026-10-08');     // empty day → first with times
+  assert.equal(shownDay(page), '2026-10-08');
+  /* two classes at 7 PM are one time; the 8:30 ladies-only one stays marked */
+  assert.deepEqual(timesOn(page, '2026-10-08'), [
+    { start: '2026-10-08T08:30:00+03:00', ladies_only: true },
+    { start: '2026-10-08T19:00:00+03:00', ladies_only: false }
+  ]);
+});
+
+test('a time leads to the classes at it, and a gone time to none', () => {
+  assert.deepEqual(classesAt(page, '2026-10-08T19:00:00+03:00').map((s) => s.slot_id), ['b', 'c']);
+  assert.deepEqual(classesAt(page, '2026-10-08T21:00:00+03:00'), []);
+});
+
+test('a class becomes a choice (full name, cancellation window) and a slot (with its end)', () => {
+  const { choice, slot: s } = fromClass(page.week.slots[0], 4);
+  assert.equal(choice.service_name, 'BXS (full)');
+  assert.equal(choice.pay_at_venue, true);
+  assert.equal(choice.cancellation_hours, 4);
+  assert.equal(s.slot_id, 'a');
+  assert.equal(s.ladies_only, true);
+  assert.equal(new Date(s.end).getTime() - new Date(s.start).getTime(), 60 * 60_000);
   assert.equal(choiceFromAvailability({ business_name: 'a', service_name: 'b', date: 'd', slots: [] }), null);
 });
 
@@ -82,8 +124,9 @@ test('the form uses the server\'s phone rules', () => {
 });
 
 test('booking arguments carry the normalised phone and the request id', () => {
-  assert.deepEqual(bookingArgs(choiceFor(gym, 's2')!, slot, 'Mohamed', '+97455123456', 'req-1', 'ar'), {
-    business_id: 'b1', service_id: 's2', slot_id: 'x1', customer_name: 'Mohamed',
+  const { choice } = fromClass(page.week.slots[1]);
+  assert.deepEqual(bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'ar'), {
+    business_id: 'b1', service_id: 'bxs', slot_id: 'x1', customer_name: 'Mohamed',
     customer_phone: '+97455123456', request_id: 'req-1', language: 'ar'
   });
 });
@@ -98,10 +141,9 @@ test('request ids are UUIDs and differ', () => {
 
 test('the model hears what was booked, and nothing about the customer', () => {
   const note = bookedNote(booking);
-  assert.match(note, /CrossFit class at Falcon Gym, Thu 8 Oct, 7:00 PM \(Qatar time\)/);
+  assert.match(note, /CrossFit class at Test Gym, Thu 8 Oct, 7:00 PM \(Qatar time\)/);
   assert.match(note, /Reference: ATO-AB12CD/);
   assert.match(note, /do not call create_booking/);
-  /* the note is built from the booking result alone: there is no name or phone to leak */
   assert.doesNotMatch(note, /Mohamed|974|\+?\d{8}/);
 });
 
@@ -111,6 +153,7 @@ test('booking errors map to card messages', () => {
   const c = (s: string) => classifyBookingError(s);
   assert.deepEqual(c('Sorry, that time is now fully booked. Call get_availability again and offer the user another time.'), { kind: 'slotGone', retime: true });
   assert.deepEqual(c('That time has already passed. Call get_availability and offer the user a later time.'), { kind: 'slotGone', retime: true });
+  assert.deepEqual(c('That time starts in 90 minutes or less, too soon to book through Orrbi: pick a later time.'), { kind: 'slotGone', retime: true });
   assert.deepEqual(c('This phone number already has a booking for that exact time, so nothing new was booked.'), { kind: 'duplicate', retime: false });
   assert.deepEqual(c('This phone number already has 3 booking requests waiting for confirmation. Please wait...'), { kind: 'tooMany', retime: false });
   assert.deepEqual(c('Please give a Qatar mobile number: 8 digits, optionally starting with +974 or 00974'), { kind: 'phone', retime: false });

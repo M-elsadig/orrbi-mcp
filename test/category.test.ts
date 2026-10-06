@@ -23,7 +23,7 @@ test('other categories pass through unchanged', () => {
 
 test('a business name is not mistaken for a category', () => {
   assert.equal(categoryOf('Aflete'), null);
-  assert.equal(categoryOf('Falcon Gym'), null);
+  assert.equal(categoryOf('Test Gym'), null);
   assert.equal(categoryOf('أفليت'), null);
   assert.equal(categoryOf('near me'), null);
 });

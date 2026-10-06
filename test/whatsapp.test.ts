@@ -5,7 +5,7 @@ import { whatsappLink } from '../src/lib/telegram.js';
 const alert = {
   booking_id: '00000000-0000-4000-8000-000000000000',
   reference: 'ATO-KX4CTS',
-  business_name: 'Falcon Gym',
+  business_name: 'Test Gym',
   service_name: 'CrossFit class',
   price_qar: 60,
   starts_at: '2026-10-05T15:00:00+00:00',   // 6:00 PM in Qatar
@@ -23,7 +23,7 @@ test('links to the customer number without +', () => {
 test('prefills the Arabic confirmation in Qatar time', () => {
   const text = new URL(whatsappLink(alert)).searchParams.get('text');
   assert.equal(text,
-    'مرحبا Mohamed Test، حجزك في Falcon Gym يوم الاثنين، 5 أكتوبر في 6:00 م تم تأكيده ✅ رقم الحجز: ATO-KX4CTS');
+    'مرحبا Mohamed Test، حجزك في Test Gym يوم الاثنين، 5 أكتوبر في 6:00 م تم تأكيده ✅ رقم الحجز: ATO-KX4CTS');
 });
 
 test('encodes names that contain URL syntax', () => {

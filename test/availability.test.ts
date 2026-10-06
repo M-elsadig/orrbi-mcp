@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWeek, type SlotRow } from '../src/lib/availability.js';
+import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../src/lib/cutoff.js';
 import { dayChip, periodOf } from '../ui/src/i18n.js';
 
 /* starts_at as the database returns it (UTC); Qatar is UTC+3 */
@@ -72,12 +73,17 @@ test('ladies-only is per slot: filter either way, or both with the label saying 
   assert.equal(both[2].ladies_only, false);
 });
 
-test('nothing inside the cancellation window is offered', () => {
-  const lead = (h: number) => buildWeek(tuesday, '2026-10-06', 60, Date.parse('2026-10-06T10:00:00Z'), { minLeadMs: h * 3_600_000 })
+test('nothing within the 90-minute booking cutoff is offered', () => {
+  const at = (utc: string) => buildWeek(tuesday, '2026-10-06', 60, Date.parse(utc), { minLeadMs: BOOKING_CUTOFF_MS })
     .slots.map((s) => s.slot_id);
-  /* now = Tue 1:00 PM Qatar; 4h → only 5:15 PM onwards (4:00 PM is 3h away) */
-  assert.deepEqual(lead(4), ['m1715', 'm1830']);
-  assert.deepEqual(lead(0), ['l1600', 'm1715', 'm1830']);
+  /* Tue 1:00 PM Qatar: 4:00 PM is 3h away, inside the 4h cancellation window but bookable */
+  assert.deepEqual(at('2026-10-06T10:00:00Z'), ['l1600', 'm1715', 'm1830']);
+  /* Tue 3:00 PM Qatar: 4:00 PM is 60 min away → not offered */
+  assert.deepEqual(at('2026-10-06T12:00:00Z'), ['m1715', 'm1830']);
+  /* exactly 90 min before 4:00 PM (2:30 PM Qatar) → not offered; 91 min → offered */
+  assert.deepEqual(at('2026-10-06T11:30:00Z'), ['m1715', 'm1830']);
+  assert.deepEqual(at('2026-10-06T11:29:00Z'), ['l1600', 'm1715', 'm1830']);
+  assert.equal(BOOKING_CUTOFF_MIN, 90);
 });
 
 test('morning / afternoon / evening by Qatar hour', () => {

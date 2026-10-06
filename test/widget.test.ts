@@ -65,10 +65,10 @@ test('times and dates are Qatar time in both languages', () => {
 });
 
 test('slot tap message, English and Arabic', () => {
-  assert.equal(strings('en').slotMessage('6:00 PM', 'Sun 4 Oct', 'CrossFit class', 'Falcon Gym'),
-    'I want the 6:00 PM slot on Sun 4 Oct for CrossFit class at Falcon Gym.');
-  assert.equal(strings('ar').slotMessage('6:00 م', 'الأحد، 4 أكتوبر', 'كروس فت', 'نادي الصقر'),
-    'أريد موعد 6:00 م يوم الأحد، 4 أكتوبر لـ كروس فت في نادي الصقر.');
+  assert.equal(strings('en').slotMessage('6:00 PM', 'Sun 4 Oct', 'CrossFit class', 'Test Gym'),
+    'I want the 6:00 PM slot on Sun 4 Oct for CrossFit class at Test Gym.');
+  assert.equal(strings('ar').slotMessage('6:00 م', 'الأحد، 4 أكتوبر', 'كروس فت', 'نادي التجربة'),
+    'أريد موعد 6:00 م يوم الأحد، 4 أكتوبر لـ كروس فت في نادي التجربة.');
 });
 
 test('prices in QAR', () => {

@@ -25,8 +25,8 @@ export type Week = {
 export type WeekOptions = {
   /* true: only ladies-only slots; false: only mixed; undefined: both */
   ladiesOnly?: boolean;
-  /* don't offer slots starting sooner than this (the business's
-     cancellation window), so it has time to confirm */
+  /* don't offer slots starting sooner than this (the booking cutoff,
+     src/lib/cutoff.ts), so the request can be confirmed */
   minLeadMs?: number;
 };
 

@@ -5,23 +5,14 @@ export type Service = {
   service_id: string;
   name: string;
   name_ar?: string | null;
+  /* "BxS Full Body": for one-line rows; name is the full one */
+  short_name?: string | null;
+  short_name_ar?: string | null;
+  description?: string | null;
   duration_min: number;
   price_qar: number;
   pay_at_venue?: boolean;
 };
-
-export type Business = {
-  business_id: string;
-  name: string;
-  name_ar?: string | null;
-  category: string;
-  area: string;
-  address: string;
-  image_url?: string | null;
-  services: Service[];
-};
-
-export type SearchResult = { businesses: Business[]; count: number; note?: string };
 
 export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only?: boolean };
 
@@ -62,6 +53,87 @@ export type BookingResult = {
   category?: string | null;
   first_visit?: string;
   first_visit_ar?: string | null;
+  cancellation_policy?: string;
 };
 
-export type ToolName = 'search_businesses' | 'get_availability' | 'create_booking';
+/* find_classes: one open class time, across gyms (src/lib/classes.ts) */
+export type ClassSlot = {
+  slot_id: string;
+  business_id: string;
+  business_name: string;
+  business_name_ar?: string | null;
+  area: string;
+  service_id: string;
+  class: string;
+  class_ar?: string | null;
+  class_full?: string;
+  class_full_ar?: string | null;
+  description?: string | null;
+  start: string;
+  start_label: string;
+  date?: string;
+  ladies_only: boolean;
+  category?: string;
+  price_qar?: number;
+  pay_at_venue?: boolean;
+  duration_min?: number;
+};
+
+export type PartOfDay = 'morning' | 'afternoon' | 'evening' | 'any';
+
+/* The compact card, one per gym (src/lib/cards.ts): search_businesses and
+   find_classes both open on a carousel of these */
+export type NextTime = { start: string; start_label: string; date: string; ladies_only: boolean };
+
+export type GymCard = {
+  business_id: string;
+  name: string;
+  name_ar?: string | null;
+  category: string;
+  area: string;
+  image_url?: string | null;
+  from_price_qar: number | null;
+  pay_at_venue?: boolean;
+  next_times: NextTime[];
+};
+
+export type CardsResult = {
+  gyms: GymCard[];
+  count: number;
+  date: string;
+  days: number;
+  /* a day or time was asked for, so the chips answer it */
+  timed?: boolean;
+  part_of_day?: PartOfDay | null;
+  around_time?: string | null;
+  ladies_filter?: boolean | null;
+  /* nothing in the asked window: these are the next open times */
+  next?: boolean;
+  note?: string;
+};
+
+/* get_business: the gym page (src/tools/getBusiness.ts) */
+export type GymPage = {
+  business_id: string;
+  name: string;
+  name_ar?: string | null;
+  category: string;
+  area: string;
+  address: string;
+  description?: string | null;
+  description_ar?: string | null;
+  maps_url?: string | null;
+  images: string[];
+  from_price_qar: number | null;
+  pay_at_venue: boolean;
+  cancellation_hours?: number | null;
+  cancellation_policy?: string | null;
+  first_visit?: string | null;
+  first_visit_ar?: string | null;
+  services: Service[];
+  other_services: { name: string; name_ar?: string | null; price: string }[];
+  class_hours: { weekday: number; first: string; last: string }[];
+  week: { date: string; days: number; slots: ClassSlot[] };
+};
+
+export type ToolName = 'search_businesses' | 'get_availability' | 'find_classes' | 'create_booking';

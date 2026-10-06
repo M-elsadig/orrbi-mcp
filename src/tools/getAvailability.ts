@@ -6,6 +6,7 @@ import { fail, guard, ok } from '../lib/results.js';
 import { languageInput } from '../lib/language.js';
 import { WINDOW_DAYS, buildWeek } from '../lib/availability.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
+import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../lib/cutoff.js';
 import { WIDGET_URI } from '../widget.js';
 import { TZ_LABEL, addDays, isRealDate, qatarDayRange, todayInQatar } from '../lib/time.js';
 
@@ -30,7 +31,8 @@ export function registerGetAvailability(server: McpServer) {
         'Never call it in a loop over services or dates: the card shown to the user already covers the next 7 days and lets them switch days and pick a time. ' +
         'If the requested date has no open times, the result shows the next day that has some, and note says so. ' +
         'Call it again only for a different service, or for one specific date to get the slot_id of a time the user picked. ' +
-        'Only times the business can still confirm are returned (nothing inside its cancellation window). ' +
+        'Only times the business can still confirm are returned (nothing starting in the next 90 minutes). ' +
+        'cancellation_policy is the free-cancellation rule to pass on, not a booking limit. ' +
         'Do not tell the user how many places are left: Orrbi does not know, and every booking is a request the business confirms. ' +
         'Ladies-only is a property of each time, not of the class: the same class can be ladies-only at 8:30 AM and mixed at 5:15 PM. ' +
         'If the user asked for ladies-only or women-only classes, pass ladies_only: true. If they asked for mixed classes, pass ladies_only: false. ' +
@@ -62,7 +64,7 @@ export function registerGetAvailability(server: McpServer) {
         pay_at_venue: z.boolean().optional(),
         category: z.string().optional(),
         ladies_only: z.boolean().optional(),
-        cutoff_hours: z.number().optional(),
+        cutoff_min: z.number().optional(),
         duration_min: z.number().optional(),
         date: z.string(),
         requested_date: z.string().optional(),
@@ -120,10 +122,10 @@ export function registerGetAvailability(server: McpServer) {
         .limit(1000);
       if (error) throw error;
 
-      const cutoffHours = Number(biz.data.cancellation_hours ?? 0);
+      /* nothing within the booking cutoff; the cancellation window is only said */
       const week = buildWeek(data ?? [], date, Number(svc.data.duration_min), Date.now(), {
         ladiesOnly: ladies_only,
-        minLeadMs: cutoffHours * 3_600_000
+        minLeadMs: BOOKING_CUTOFF_MS
       });
       const kind = ladies_only === true ? 'ladies-only ' : ladies_only === false ? 'mixed ' : '';
       const svcName = svc.data.name_en;
@@ -160,7 +162,7 @@ export function registerGetAvailability(server: McpServer) {
         price_qar: Number(svc.data.price),
         pay_at_venue: Boolean(biz.data.pay_at_venue),
         category: biz.data.category,
-        cutoff_hours: cutoffHours,
+        cutoff_min: BOOKING_CUTOFF_MIN,
         duration_min: Number(svc.data.duration_min),
         requested_date: date,
         days: week.days

@@ -9,6 +9,7 @@ import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
 import { notifyTelegram, sendTelegram } from '../lib/telegram.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
+import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../lib/cutoff.js';
 import { WIDGET_URI } from '../widget.js';
 import { languageInput } from '../lib/language.js';
 
@@ -142,13 +143,14 @@ export function registerCreateBooking(server: McpServer) {
           'Tell the user to arrange it with the business directly, or offer one of its classes instead.');
       }
 
-      /* the business needs its cancellation window to confirm a request, so
-         nothing starting sooner than that can be booked (get_availability
-         doesn't offer those either) */
-      if (ctx.slot_starts_at && ctx.cancellation_hours) {
+      /* a request needs confirming by hand, so nothing starting within the
+         booking cutoff can be booked (no tool offers those either). The
+         cancellation window is a policy, not a cutoff. */
+      if (ctx.slot_starts_at) {
         const lead = new Date(ctx.slot_starts_at).getTime() - Date.now();
-        if (lead > 0 && lead < ctx.cancellation_hours * 3_600_000) {
-          return fail(`That time starts in less than ${ctx.cancellation_hours} hours, too soon to book through Orrbi: ` +
+        /* same edge as the lists: a time exactly 90 minutes away is neither offered nor bookable */
+        if (lead > 0 && lead <= BOOKING_CUTOFF_MS) {
+          return fail(`That time starts in ${BOOKING_CUTOFF_MIN} minutes or less, too soon to book through Orrbi: ` +
             `${ctx.business_name ?? 'the business'} needs time to confirm. Call get_availability again and offer the user a later time.`);
         }
       }

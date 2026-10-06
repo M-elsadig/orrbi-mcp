@@ -45,8 +45,9 @@ export function bookingArgs(choice: Choice, slot: Slot, name: string, phone: str
    nothing about the customer: no name, no phone. */
 export function bookedNote(b: BookingResult): string {
   const when = b.start_label ? `${b.start_label} (Qatar time)` : b.start;
-  return `The user booked in the Orrbi card: ${b.service_name} at ${b.business_name}, ${when}. ` +
-    `Status: ${b.status}. Reference: ${b.reference}. The booking is done; do not call create_booking for it again.`;
+  return `The user sent a booking request in the Orrbi card: ${b.service_name} at ${b.business_name}, ${when}. ` +
+    `Status: ${b.status} (a request, not confirmed until the business confirms). Reference: ${b.reference}. ` +
+    'The card already shows it; do not repeat the details, and do not call create_booking for it again.';
 }
 
 /* create_booking's error sentences (src/tools/createBooking.ts) → what the
