@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db } from './supabase.js';
-import { coverImage } from './images.js';
+import { type FocusMap, coverPhoto } from './images.js';
 import { type ClassSlotUi, type NextTime, nextTimes } from './classes.js';
 
 /* The compact card, one per gym: photo, name, area, "From 100 QAR" and the
@@ -15,6 +15,9 @@ export type GymCard = {
   category: string;
   area: string;
   image_url: string | null;
+  /* 1x/2x/3x of the cover, and where to aim its crop */
+  image_srcset: string | null;
+  image_position: string | null;
   from_price_qar: number | null;
   pay_at_venue: boolean;
   next_times: NextTime[];
@@ -35,11 +38,12 @@ export type GymRow = {
   category: string;
   area: string;
   images: string[] | null;
+  image_focus?: FocusMap;
   pay_at_venue: boolean | null;
   services: { price: number | string; bookable: boolean }[] | null;
 };
 
-export const GYM_SELECT = 'id,name_en,name_ar,category,area,images,pay_at_venue,services(price,bookable,is_active)';
+export const GYM_SELECT = 'id,name_en,name_ar,category,area,images,image_focus,pay_at_venue,services(price,bookable,is_active)';
 
 /* lowest price of a class that can be booked */
 export function fromPrice(services: GymRow['services']): number | null {
@@ -48,13 +52,16 @@ export function fromPrice(services: GymRow['services']): number | null {
 }
 
 export function gymCard(b: GymRow, slots: ClassSlotUi[]): GymCard {
+  const cover = coverPhoto(b.images, b.image_focus);
   return {
     business_id: b.id,
     name: b.name_en,
     name_ar: b.name_ar || null,
     category: b.category,
     area: b.area,
-    image_url: coverImage(b.images),
+    image_url: cover?.src ?? null,
+    image_srcset: cover?.srcset ?? null,
+    image_position: cover?.position ?? null,
     from_price_qar: fromPrice(b.services),
     pay_at_venue: Boolean(b.pay_at_venue),
     next_times: nextTimes(slots.filter((s) => s.business_id === b.id))

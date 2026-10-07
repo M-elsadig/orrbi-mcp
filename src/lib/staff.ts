@@ -1,10 +1,10 @@
-import { publicImage } from './images.js';
+import { photoFor } from './images.js';
 
 /* Trainers for 1:1 appointments (public.staff). An appointment slot belongs
    to one trainer (availability.staff_id), so picking the slot picks the
    trainer. Group classes have no trainer. */
 
-export const STAFF_EMBED = 'staff(id,name,gender,title_en,title_ar,photo_url)';
+export const STAFF_EMBED = 'staff(id,name,gender,title_en,title_ar,photo_url,photo_focus)';
 
 export type StaffRow = {
   id: string;
@@ -13,6 +13,7 @@ export type StaffRow = {
   title_en: string | null;
   title_ar: string | null;
   photo_url: string | null;
+  photo_focus?: string | null;
 };
 
 export type Trainer = {
@@ -22,17 +23,22 @@ export type Trainer = {
   title: string | null;
   title_ar: string | null;
   photo_url: string | null;
+  photo_srcset: string | null;
+  photo_position: string | null;
 };
 
 export function toTrainer(r: StaffRow | null | undefined): Trainer | null {
   if (!r?.id || !r.name) return null;
+  const photo = photoFor(r.photo_url, 'avatar', r.photo_focus);
   return {
     id: r.id,
     name: r.name,
     gender: r.gender === 'male' || r.gender === 'female' ? r.gender : null,
     title: r.title_en || null,
     title_ar: r.title_ar || null,
-    photo_url: publicImage(r.photo_url, 'avatar')
+    photo_url: photo?.src ?? null,
+    photo_srcset: photo?.srcset ?? null,
+    photo_position: photo?.position ?? null
   };
 }
 

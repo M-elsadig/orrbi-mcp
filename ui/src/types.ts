@@ -22,7 +22,12 @@ export type Trainer = {
   title?: string | null;
   title_ar?: string | null;
   photo_url?: string | null;
+  photo_srcset?: string | null;
+  photo_position?: string | null;
 };
+
+/* one photo: 1x/2x/3x versions and where to aim the crop (src/lib/images.ts) */
+export type Photo = { src: string; srcset?: string | null; position?: string | null };
 
 export type TrainerProfile = Trainer & {
   specialties: string[];
@@ -135,6 +140,8 @@ export type GymCard = {
   category: string;
   area: string;
   image_url?: string | null;
+  image_srcset?: string | null;
+  image_position?: string | null;
   from_price_qar: number | null;
   pay_at_venue?: boolean;
   next_times: NextTime[];
@@ -167,6 +174,8 @@ export type GymPage = {
   description_ar?: string | null;
   maps_url?: string | null;
   images: string[];
+  /* the same photos with srcset and focal point (newer servers) */
+  photos?: Photo[];
   from_price_qar: number | null;
   pay_at_venue: boolean;
   cancellation_hours?: number | null;

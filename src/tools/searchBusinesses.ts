@@ -81,6 +81,7 @@ type Row = {
   cancellation_hours: number | null;
   first_visit_note_en: string | null;
   images: string[] | null;
+  image_focus: Record<string, unknown> | null;
   services: ServiceRow[] | null;
 };
 
@@ -150,7 +151,7 @@ export function registerSearchBusinesses(server: McpServer) {
       let q = db()
         .from('businesses')
         .select('id,name_en,name_ar,category,area,address,description_en,maps_url,pay_at_venue,cancellation_hours,' +
-          'first_visit_note_en,images,' +
+          'first_visit_note_en,images,image_focus,' +
           'services(id,name_en,name_ar,short_name_en,short_name_ar,description_en,duration_min,price,bookable,price_note_en)')
         .eq('is_active', true)
         .eq('services.is_active', true)

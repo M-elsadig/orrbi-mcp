@@ -32,7 +32,7 @@ type Template = {
 };
 
 const { data: biz, error } = await db().from('businesses')
-  .select('id,name_en,name_ar,category,area,images,pay_at_venue,cancellation_hours,booking_cutoff_min,is_active,services(price,bookable,is_active)')
+  .select('id,name_en,name_ar,category,area,images,image_focus,pay_at_venue,cancellation_hours,booking_cutoff_min,is_active,services(price,bookable,is_active)')
   .eq('name_en', name).maybeSingle();
 if (error) throw error;
 if (!biz) throw new Error(`No business named "${name}"`);
@@ -103,7 +103,8 @@ page.images = (await Promise.all(page.images.map(inline))).filter((u): u is stri
 for (const s of page.staff) s.photo_url = await inline(s.photo_url);
 /* the trainer picker takes photos from page.staff; one copy per slot would be megabytes */
 for (const s of page.week.slots) if (s.trainer_info) s.trainer_info.photo_url = null;
-card.image_url = page.images[0] ?? null;
+/* the card's own photo (its size and crop), as a client would get it */
+card.image_url = await inline(card.image_url);
 
 const fixture = {
   generated_at: new Date().toISOString(),

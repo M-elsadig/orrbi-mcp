@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { fail, guard, ok } from '../lib/results.js';
-import { galleryImages } from '../lib/images.js';
+import { type FocusMap, galleryPhotos } from '../lib/images.js';
 import { languageInput } from '../lib/language.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
 import { type ClassSlotUi, classHours } from '../lib/classes.js';
@@ -38,6 +38,7 @@ type Row = {
   first_visit_note_en: string | null;
   first_visit_note_ar: string | null;
   images: string[] | null;
+  image_focus: FocusMap;
   services: {
     id: string; name_en: string; name_ar: string | null; short_name_en: string | null; short_name_ar: string | null;
     description_en: string | null; duration_min: number; price: number | string; bookable: boolean; price_note_en: string | null;
@@ -71,7 +72,7 @@ export function registerGetBusiness(server: McpServer) {
 export async function gymPage(business_id: string, preview?: { slots: ClassSlotUi[] }) {
   let q = db().from('businesses')
     .select('id,name_en,name_ar,category,area,address,description_en,description_ar,maps_url,pay_at_venue,cancellation_hours,' +
-      'booking_cutoff_min,first_visit_note_en,first_visit_note_ar,images,' +
+      'booking_cutoff_min,first_visit_note_en,first_visit_note_ar,images,image_focus,' +
       'services(id,name_en,name_ar,short_name_en,short_name_ar,description_en,duration_min,price,bookable,price_note_en)')
     .eq('id', business_id).eq('services.is_active', true);
   if (!preview) q = q.eq('is_active', true);
@@ -84,7 +85,7 @@ export async function gymPage(business_id: string, preview?: { slots: ClassSlotU
     db().from('schedule_templates')
       .select('weekday,start_time,bookable').eq('business_id', business_id).eq('is_active', true),
     db().from('staff')
-      .select('id,name,gender,title_en,title_ar,photo_url,specialties_en,specialties_ar,bio_en,bio_ar,sort')
+      .select('id,name,gender,title_en,title_ar,photo_url,photo_focus,specialties_en,specialties_ar,bio_en,bio_ar,sort')
       .eq('business_id', business_id).eq('is_active', true),
     loadRequirements([business_id])
   ]);
@@ -94,6 +95,7 @@ export async function gymPage(business_id: string, preview?: { slots: ClassSlotU
   const date = todayInQatar();
   const slots = preview ? preview.slots : (await openSlots(date, WEEK, { business_id }, {}, Date.now(), false)).slots;
 
+  const photos = galleryPhotos(b.images, b.image_focus);
   const all = (b.services ?? []).slice().sort((x, y) => x.name_en.localeCompare(y.name_en));
   const pay = { pay_at_venue: b.pay_at_venue, category: b.category };
   return {
@@ -106,7 +108,9 @@ export async function gymPage(business_id: string, preview?: { slots: ClassSlotU
     description: b.description_en,
     description_ar: b.description_ar,
     maps_url: b.maps_url,
-    images: galleryImages(b.images),
+    /* the photos as URLs (older cards) and with srcset and focal point */
+    images: photos.map((p) => p.src),
+    photos,
     from_price_qar: fromPrice(all),
     pay_at_venue: Boolean(b.pay_at_venue),
     payment: paymentNote(pay),

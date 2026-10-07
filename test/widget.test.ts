@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { claudeDomain, uiProfile } from '../src/widget.js';
-import { coverImage, galleryImages, publicImage } from '../src/lib/images.js';
+import { coverImage, coverPhoto, focusPosition, galleryPhotos, photoFor, publicImage } from '../src/lib/images.js';
 import { dayLabel, priceLabel, strings, timeLabel } from '../ui/src/i18n.js';
 
 /* ── ui.domain ── */
@@ -36,18 +36,36 @@ test('MCP_PUBLIC_URL overrides the Claude connector URL', () => {
 const STORAGE = 'https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/object/public/businesses/falcon.jpg';
 
 const RENDERED = (w: number) =>
-  `https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/render/image/public/businesses/falcon.jpg?width=${w}&quality=70`;
+  `https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/render/image/public/businesses/falcon.jpg?width=${w}&resize=contain&quality=75`;
 
-test('uses the first image when it is in our public storage, resized for the card', () => {
-  assert.equal(coverImage([STORAGE, 'https://other.example/x.jpg']), RENDERED(400));
+test('resized by width only, never cropped by Supabase (resize=contain keeps the aspect ratio)', () => {
+  /* without resize=contain Supabase keeps the original height and returns a strip */
+  for (const url of coverPhoto([STORAGE])!.srcset.split(', ')) assert.match(url, /[?&]resize=contain&quality=75 [123]x$/);
 });
 
-test('the gym page photos are 800px, trainer photos 160px, spaces in names kept encoded', () => {
-  assert.deepEqual(galleryImages([STORAGE]), [RENDERED(800)]);
-  assert.equal(publicImage(STORAGE, 'avatar'), RENDERED(160));
+test('the card cover comes at 1x/2x/3x of 330pt (≈1000px for an iPhone), src = 2x', () => {
+  const p = coverPhoto([STORAGE, 'https://other.example/x.jpg'])!;
+  assert.equal(p.src, RENDERED(660));
+  assert.equal(p.srcset, `${RENDERED(330)} 1x, ${RENDERED(660)} 2x, ${RENDERED(990)} 3x`);
+  assert.equal(p.position, null);
+  assert.equal(coverImage([STORAGE]), RENDERED(660));
+});
+
+test('gym page photos at 390/780/1170, trainer avatars at 56/112/168, spaces stay encoded', () => {
+  assert.deepEqual(galleryPhotos([STORAGE]).map((p) => p.srcset),
+    [`${RENDERED(390)} 1x, ${RENDERED(780)} 2x, ${RENDERED(1170)} 3x`]);
+  assert.equal(photoFor(STORAGE, 'avatar')!.srcset, `${RENDERED(56)} 1x, ${RENDERED(112)} 2x, ${RENDERED(168)} 3x`);
   assert.equal(publicImage(STORAGE), STORAGE);
-  assert.equal(publicImage('https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/object/public/business-images/aflete/aflete%201.jpeg', 'thumb'),
-    'https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/render/image/public/business-images/aflete/aflete%201.jpeg?width=400&quality=70');
+  assert.match(photoFor('https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/object/public/business-images/aflete/aflete%201.jpeg', 'thumb')!.src,
+    /\/render\/image\/public\/business-images\/aflete\/aflete%201\.jpeg\?width=660&resize=contain&quality=75$/);
+});
+
+test('focal point per photo: stored "x% y%" becomes object-position; anything else is center', () => {
+  const focus = { [STORAGE]: '50% 25%' };
+  assert.equal(coverPhoto([STORAGE], focus)!.position, '50% 25%');
+  assert.equal(galleryPhotos([STORAGE], focus)[0].position, '50% 25%');
+  assert.equal(photoFor(STORAGE, 'avatar', '40% 10%')!.position, '40% 10%');
+  for (const bad of ['top', '50%', '101% 0%', 'url(x) 1%', 7, null]) assert.equal(focusPosition(bad), null, String(bad));
 });
 
 test('drops anything the widget CSP would block', () => {

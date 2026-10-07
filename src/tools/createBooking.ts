@@ -430,7 +430,7 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
       db().from('services').select('name_en,name_ar,price,bookable').eq('id', serviceId).abortSignal(signal).maybeSingle(),
       db().from('business_private').select('booking_contact_name,booking_contact_phone')
         .eq('business_id', businessId).abortSignal(signal).maybeSingle(),
-      db().from('availability').select('starts_at,ladies_only,staff(id,name,gender,title_en,title_ar,photo_url)')
+      db().from('availability').select('starts_at,ladies_only,staff(id,name,gender,title_en,title_ar,photo_url,photo_focus)')
         .eq('id', slotId).abortSignal(signal).maybeSingle()
     ]);
     const price = s.data?.price;

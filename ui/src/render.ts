@@ -1,5 +1,5 @@
 import type {
-  AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Requirement, Slot, ToolName, Trainer
+  AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Photo, Requirement, Slot, ToolName, Trainer
 } from './types';
 import {
   type Answers, type Choice, type DetailsForm, type GymStep, classesAt, flaggedBy, shownDay, slotsByDay, timesOn
@@ -86,7 +86,7 @@ export function viewCards(r: CardsResult, lang: Lang, on: CardsHandlers): HTMLEl
     const name = pick(g.name, g.name_ar, lang);
     const price = fromLabel(g.from_price_qar, lang);
     const inner = [
-      photo(g.image_url, 'gc-photo'),
+      photo(g.image_url, 'gc-photo', { srcset: g.image_srcset, position: g.image_position }),
       h('span', { class: 'gc-body' },
         h('span', { class: 'gc-name' }, name),
         h('span', { class: 'gc-meta' }, [g.area, price].filter(Boolean).join(' · '))
@@ -134,13 +134,20 @@ function dayName(ymd: string, lang: Lang, today: string): string {
    then it fades in (opacity only). No photo, or one that fails, leaves a
    calm empty surface: never a blank hole, never a letter. Lazy unless it is
    the one photo worth fetching first (the gym page's cover). */
-function photo(src: string | null | undefined, cls: string, opts: { eager?: boolean; alt?: string } = {}): HTMLElement {
+function photo(
+  src: string | null | undefined, cls: string,
+  opts: { eager?: boolean; alt?: string; srcset?: string | null; position?: string | null } = {}
+): HTMLElement {
   const box = h('div', { class: `ph ${cls} ${src ? 'loading' : 'empty'}`, 'aria-hidden': opts.alt ? undefined : 'true' });
   if (!src) return box;
   const img = h('img', {
     src, alt: opts.alt ?? '', decoding: 'async', loading: opts.eager ? 'eager' : 'lazy',
     ...(opts.eager ? { fetchpriority: 'high' } : {})
   }) as HTMLImageElement;
+  /* 1x/2x/3x: the browser picks by screen density (iPhones are 3x) */
+  if (opts.srcset) img.srcset = opts.srcset;
+  /* the one crop is object-fit: cover, aimed at the photo's focal point */
+  if (opts.position) img.style.objectPosition = opts.position;
   const ready = () => box.classList.remove('loading');
   img.addEventListener('load', ready, { once: true });
   img.addEventListener('error', () => { img.remove(); box.classList.replace('loading', 'empty'); }, { once: true });
@@ -186,12 +193,12 @@ function pin(): SVGElement {
   return svg;
 }
 
-function buildHero(photos: string[], name: string, lang: Lang, onBack?: () => void): HTMLElement {
+function buildHero(photos: Photo[], name: string, lang: Lang, onBack?: () => void): HTMLElement {
   let hero: HTMLElement;
   if (photos.length) {
     /* only the cover is fetched first; the rest load as they come into view */
     const track = h('div', { class: 'gp-track' },
-      ...photos.map((src, i) => photo(src, 'gp-shot', { eager: i === 0, alt: i === 0 ? name : '' })));
+      ...photos.map((p, i) => photo(p.src, 'gp-shot', { eager: i === 0, alt: i === 0 ? name : '', srcset: p.srcset, position: p.position })));
     const dots = photos.length > 1
       ? h('div', { class: 'gp-dots', 'aria-hidden': 'true' }, ...photos.map((_, i) => h('span', { class: i === 0 ? 'on' : undefined })))
       : null;
@@ -234,12 +241,15 @@ export function viewGymPage(step: GymStep, lang: Lang, on: GymHandlers): HTMLEle
   const g = step.card;
   const page = step.page;
   const name = pick(g.name, g.name_ar, lang);
-  const photos = page?.images?.length ? page.images : g.image_url ? [g.image_url] : [];
+  /* the page's photos once loaded; until then the card's cover */
+  const photos: Photo[] = page?.photos?.length ? page.photos
+    : page?.images?.length ? page.images.map((src) => ({ src }))
+    : g.image_url ? [{ src: g.image_url, srcset: g.image_srcset, position: g.image_position }] : [];
 
   /* ── photos: swipe (native scroll-snap), with dots. Built once per photo
      set and reused on every redraw of the page (a tap on a day or time),
      so photos are never re-created, re-decoded or reset while browsing. */
-  const heroKey = photos.join('|');
+  const heroKey = photos.map((p) => p.src).join('|');
   let hero: HTMLElement;
   if (step.hero && step.heroKey === heroKey) {
     hero = step.hero;
@@ -403,7 +413,7 @@ function plusDays(ymd: string, n: number): string {
 
 /* a trainer's photo; a quiet empty circle when there is none */
 function trainerPhoto(p: Trainer): HTMLElement {
-  return photo(p.photo_url, 'avatar');
+  return photo(p.photo_url, 'avatar', { srcset: p.photo_srcset, position: p.photo_position });
 }
 
 /* ── Class: which class at the time picked ──────────────────────────────── */
@@ -418,7 +428,7 @@ export function viewClassPick(
   const ladies = options.some((s) => s.ladies_only);
   const trainers = options.length > 0 && options.every((s) => s.trainer_info);
   /* photos come from the page's trainer list, not from every slot */
-  const photoOf = (tr: Trainer) => staff.find((p) => p.id === tr.id)?.photo_url ?? tr.photo_url;
+  const photoOf = (tr: Trainer): Trainer => staff.find((p) => p.id === tr.id) ?? tr;
   return h('section', { class: 'card pad' },
     header(lang, onBack, trainers ? t.chooseTrainer : t.chooseClass, dateTimeLabel(start, lang)),
     ladies ? h('p', { class: 'women-note', role: 'note' }, `${LADIES_MARK} ${t.womenOnlyNote}`) : null,
@@ -431,7 +441,7 @@ export function viewClassPick(
       const tr = s.trainer_info;
       const title = tr ? pick(tr.title ?? '', tr.title_ar, lang) : '';
       const btn = h('button', { class: `pick tappable${tr ? ' with-avatar' : ''}`, type: 'button' },
-        tr ? trainerPhoto({ ...tr, photo_url: photoOf(tr) }) : null,
+        tr ? trainerPhoto(photoOf(tr)) : null,
         h('span', { class: 'pick-main' },
           h('span', { class: 'pick-name' },
             h('span', {}, tr ? tr.name : pick(s.class_full || s.class, s.class_full_ar || s.class_ar, lang)),
