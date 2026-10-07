@@ -1,5 +1,6 @@
 import { db } from './supabase.js';
 import { type ClassFilter, type ClassRow, type ClassSlotUi, dayRange, pickSlots } from './classes.js';
+import { STAFF_EMBED } from './staff.js';
 
 /* Open, bookable class times from the database. Shared by find_classes,
    search_businesses (the card's next times) and get_business (the gym
@@ -10,7 +11,8 @@ export const NEXT_DAYS = 7;     // how far ahead to look when the asked window i
 const SELECT =
   'id,starts_at,capacity,booked_count,ladies_only,business_id,service_id,' +
   'services!inner(name_en,name_ar,short_name_en,short_name_ar,description_en,price,duration_min,bookable,is_active),' +
-  'businesses!inner(name_en,name_ar,area,category,pay_at_venue,cancellation_hours,is_active)';
+  'businesses!inner(name_en,name_ar,area,category,pay_at_venue,cancellation_hours,booking_cutoff_min,is_active),' +
+  STAFF_EMBED;
 
 export type Where = { business_id?: string; business_ids?: string[]; area?: string; category?: string; text?: string };
 

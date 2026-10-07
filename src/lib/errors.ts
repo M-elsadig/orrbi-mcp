@@ -43,15 +43,23 @@ export function describe(e: unknown): Described {
   return { message: String(e), code: null, detail: {} };
 }
 
-/* Phone numbers become their last 3 digits; everything else is kept, since
-   ids, dates and names are what make an error reproducible. */
+/* Phone numbers become their last 3 digits; requirement answers (health
+   data) only their count; everything else is kept, since ids, dates and
+   names are what make an error reproducible. */
 export function redact(context: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(context)) {
     if (v === undefined) continue;
-    out[k] = /phone/i.test(k) && typeof v === 'string' ? `…${v.replace(/\D/g, '').slice(-3)}` : v;
+    out[k] = /phone/i.test(k) && typeof v === 'string' ? `…${v.replace(/\D/g, '').slice(-3)}`
+      : k === 'requirements' ? withoutAnswers(v)
+      : v;
   }
   return out;
+}
+
+export function withoutAnswers(v: unknown): string | undefined {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? `[${v.length} answers]` : '[answers]';
 }
 
 /* Record an error and ping the owner. Resolves to the ref; never throws. */

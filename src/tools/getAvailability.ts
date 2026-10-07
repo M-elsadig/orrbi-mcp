@@ -4,9 +4,11 @@ import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { fail, guard, ok } from '../lib/results.js';
 import { languageInput } from '../lib/language.js';
-import { WINDOW_DAYS, buildWeek } from '../lib/availability.js';
+import { type SlotRow, WINDOW_DAYS, buildWeek } from '../lib/availability.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
-import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../lib/cutoff.js';
+import { cutoffMin, cutoffMs, cutoffText } from '../lib/cutoff.js';
+import { REQUIREMENTS_NOTE, forService, loadRequirements, requirementOut } from '../lib/requirements.js';
+import { STAFF_EMBED } from '../lib/staff.js';
 import { WIDGET_URI } from '../widget.js';
 import { TZ_LABEL, addDays, isRealDate, qatarDayRange, todayInQatar } from '../lib/time.js';
 
@@ -15,8 +17,15 @@ const slotOut = z.object({
   start: z.string(),
   end: z.string(),
   start_label: z.string(),
-  ladies_only: z.boolean()
+  ladies_only: z.boolean(),
+  trainer: z.object({ id: z.string(), name: z.string() }).passthrough().optional()
 });
+
+export const requirementSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['question', 'notice']),
+  text: z.string()
+}).passthrough();
 
 export function registerGetAvailability(server: McpServer) {
   registerAppTool(
@@ -31,7 +40,10 @@ export function registerGetAvailability(server: McpServer) {
         'Never call it in a loop over services or dates: the card shown to the user already covers the next 7 days and lets them switch days and pick a time. ' +
         'If the requested date has no open times, the result shows the next day that has some, and note says so. ' +
         'Call it again only for a different service, or for one specific date to get the slot_id of a time the user picked. ' +
-        'Only times the business can still confirm are returned (nothing starting in the next 90 minutes). ' +
+        'Only times the business can still confirm are returned (nothing inside its booking cutoff, cutoff_min: e.g. 90 minutes, or 2 hours for some). ' +
+        'For 1:1 appointments each time is with one trainer (trainer, and start_label says "with <name>"): if the user named a trainer, pass staff_id; ' +
+        'otherwise let them choose, and always say who a time is with. ' +
+        'If requirements is returned, the user must answer them before create_booking (see note). ' +
         'cancellation_policy is the free-cancellation rule to pass on, not a booking limit. ' +
         'Do not tell the user how many places are left: Orrbi does not know, and every booking is a request the business confirms. ' +
         'Ladies-only is a property of each time, not of the class: the same class can be ladies-only at 8:30 AM and mixed at 5:15 PM. ' +
@@ -48,6 +60,8 @@ export function registerGetAvailability(server: McpServer) {
           .describe('The day to check, as YYYY-MM-DD in Qatar time.'),
         ladies_only: z.boolean().optional()
           .describe('true: only ladies-only times. false: only mixed times. Omit to get both (ladies-only ones are marked).'),
+        staff_id: z.uuid('staff_id must be a trainer id from a previous result').optional()
+          .describe('1:1 appointments only: a trainer id (slots[].trainer.id) to show only that trainer\'s times.'),
         language: languageInput
       },
       outputSchema: {
@@ -71,6 +85,7 @@ export function registerGetAvailability(server: McpServer) {
         timezone: z.string(),
         slots: z.array(slotOut),
         days: z.array(z.object({ date: z.string(), slots: z.array(slotOut) })).optional(),
+        requirements: z.array(requirementSchema).optional(),
         note: z.string().optional()
       },
       annotations: {
@@ -82,14 +97,14 @@ export function registerGetAvailability(server: McpServer) {
       },
       _meta: { ui: { resourceUri: WIDGET_URI } }
     },
-    async ({ business_id, service_id, date, ladies_only }) => guard('get_availability', async () => {
+    async ({ business_id, service_id, date, ladies_only, staff_id }) => guard('get_availability', async () => {
       if (!isRealDate(date)) return fail(`${date} is not a real calendar date. Please use YYYY-MM-DD.`);
 
       const today = todayInQatar();
       if (date < today) return fail(`${date} is in the past. Today in Qatar is ${today}; please pick today or a later date.`);
 
       const [biz, svc] = await Promise.all([
-        db().from('businesses').select('id,name_en,name_ar,category,pay_at_venue,cancellation_hours')
+        db().from('businesses').select('id,name_en,name_ar,category,pay_at_venue,cancellation_hours,booking_cutoff_min')
           .eq('id', business_id).eq('is_active', true).maybeSingle(),
         db().from('services').select('id,name_en,name_ar,duration_min,price,business_id,bookable')
           .eq('id', service_id).eq('is_active', true).maybeSingle()
@@ -111,33 +126,43 @@ export function registerGetAvailability(server: McpServer) {
       /* the whole week in one query: the card switches days without asking again */
       const from = qatarDayRange(date).from;
       const to = qatarDayRange(addDays(date, WINDOW_DAYS - 1)).to;
-      const { data, error } = await db()
-        .from('availability')
-        .select('id,starts_at,capacity,booked_count,ladies_only')
-        .eq('business_id', business_id)
-        .eq('service_id', service_id)
-        .gte('starts_at', from.toISOString())
-        .lt('starts_at', to.toISOString())
-        .order('starts_at', { ascending: true })
-        .limit(1000);
-      if (error) throw error;
+      const [slotRes, reqMap] = await Promise.all([
+        db()
+          .from('availability')
+          .select(`id,starts_at,capacity,booked_count,ladies_only,${STAFF_EMBED}`)
+          .eq('business_id', business_id)
+          .eq('service_id', service_id)
+          .gte('starts_at', from.toISOString())
+          .lt('starts_at', to.toISOString())
+          .order('starts_at', { ascending: true })
+          .limit(1000),
+        loadRequirements([business_id])
+      ]);
+      if (slotRes.error) throw slotRes.error;
+      const requirements = forService(reqMap.get(business_id) ?? [], service_id).map(requirementOut);
 
-      /* nothing within the booking cutoff; the cancellation window is only said */
-      const week = buildWeek(data ?? [], date, Number(svc.data.duration_min), Date.now(), {
+      /* nothing within the business's booking cutoff; the cancellation window is only said */
+      const cutoff = biz.data.booking_cutoff_min;
+      const week = buildWeek((slotRes.data ?? []) as unknown as SlotRow[], date, Number(svc.data.duration_min), Date.now(), {
         ladiesOnly: ladies_only,
-        minLeadMs: BOOKING_CUTOFF_MS
+        minLeadMs: cutoffMs(cutoff),
+        staffId: staff_id
       });
       const kind = ladies_only === true ? 'ladies-only ' : ladies_only === false ? 'mixed ' : '';
       const svcName = svc.data.name_en;
       const bizName = biz.data.name_en;
 
-      let note: string | undefined;
+      const notes: string[] = [];
       if (!week.slots.length) {
-        note = `No open ${kind}times for ${svcName} at ${bizName} in the ${WINDOW_DAYS} days from ${date}. ` +
-          (ladies_only !== undefined ? 'Check the class schedule in search_businesses (weekly_times) for when it runs, or offer another class.' : 'Offer to check a later date.');
+        notes.push(`No open ${kind}times for ${svcName} at ${bizName} in the ${WINDOW_DAYS} days from ${date}` +
+          `${staff_id ? ' with that trainer' : ''} (requests close ${cutoffText(cutoff)} before the start). ` +
+          (ladies_only !== undefined ? 'Check the class schedule in search_businesses (weekly_times) for when it runs, or offer another class.'
+            : staff_id ? 'Offer the other trainer, or a later date.' : 'Offer to check a later date.'));
       } else if (week.date !== date) {
-        note = `No open ${kind}times on ${date}; showing the next available day, ${week.date}.`;
+        notes.push(`No open ${kind}times on ${date}; showing the next available day, ${week.date}.`);
       }
+      if (requirements.length) notes.push(REQUIREMENTS_NOTE);
+      const note = notes.length ? notes.join(' ') : undefined;
 
       /* what the model reads: the same keys as before, for the day shown */
       const answer = {
@@ -149,6 +174,7 @@ export function registerGetAvailability(server: McpServer) {
         date: week.date,
         timezone: TZ_LABEL,
         slots: week.slots,
+        ...(requirements.length ? { requirements } : {}),
         ...(note ? { note } : {})
       };
 
@@ -162,7 +188,7 @@ export function registerGetAvailability(server: McpServer) {
         price_qar: Number(svc.data.price),
         pay_at_venue: Boolean(biz.data.pay_at_venue),
         category: biz.data.category,
-        cutoff_min: BOOKING_CUTOFF_MIN,
+        cutoff_min: cutoffMin(cutoff),
         duration_min: Number(svc.data.duration_min),
         requested_date: date,
         days: week.days

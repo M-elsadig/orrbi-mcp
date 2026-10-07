@@ -1,5 +1,9 @@
-import type { AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Slot, ToolName } from './types';
-import { type Choice, type DetailsForm, type GymStep, classesAt, shownDay, slotsByDay, timesOn } from './flow';
+import type {
+  AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Requirement, Slot, ToolName, Trainer
+} from './types';
+import {
+  type Answers, type Choice, type DetailsForm, type GymStep, answered, classesAt, flaggedBy, shownDay, slotsByDay, timesOn
+} from './flow';
 import { type BookingErrorKind, type FieldErrors, validateDetails } from './booking';
 import { cancellationText } from '../../src/lib/payment.js';
 import {
@@ -306,15 +310,37 @@ function gymBody(step: GymStep, page: GymPage, lang: Lang, on: GymHandlers): HTM
     out.push(section(t.available, strip, grid));
   }
 
+  /* 1:1 appointments (trainers) say "sessions"; group gyms say "classes" */
+  const staff = page.staff ?? [];
+  const appt = staff.length > 0;
+
   /* ── classes: what each costs and how long; booked by time above ── */
   if (page.services.length) {
-    out.push(section(t.classesTitle, h('ul', { class: 'gp-list' }, ...page.services.map((s) =>
+    out.push(section(appt ? t.sessionsTitle : t.classesTitle, h('ul', { class: 'gp-list' }, ...page.services.map((s) =>
       h('li', { class: 'gp-row' },
         h('span', { class: 'gp-row-main' },
           h('span', { class: 'gp-row-name' }, pick(s.name, s.name_ar, lang)),
-          h('span', { class: 'gp-row-sub' }, durationLabel(s.duration_min, lang))),
+          h('span', { class: 'gp-row-sub' },
+            [durationLabel(s.duration_min, lang), appt ? t.privateSession : null].filter(Boolean).join(' · ')),
+          s.description ? h('span', { class: 'gp-row-sub' }, s.description) : null),
         h('span', { class: 'gp-row-price' }, priceLabel(s.price_qar, lang)))
     ))));
+  }
+
+  /* ── trainers: who the customer picks after the time ── */
+  if (appt) {
+    out.push(section(t.trainersTitle, h('ul', { class: 'gp-staff' }, ...staff.map((p) => {
+      const title = pick(p.title ?? '', p.title_ar, lang);
+      const skills = lang === 'ar' && p.specialties_ar.length ? p.specialties_ar : p.specialties;
+      const bio = pick(p.bio ?? '', p.bio_ar, lang);
+      return h('li', { class: 'gp-trainer' },
+        trainerPhoto(p),
+        h('div', { class: 'gp-trainer-text' },
+          h('p', { class: 'gp-row-name' }, p.name),
+          title ? h('p', { class: 'gp-row-sub' }, title) : null,
+          skills.length ? h('ul', { class: 'gp-skills' }, ...skills.map((s) => h('li', { class: 'tag' }, s))) : null,
+          bio ? h('p', { class: 'gp-trainer-bio' }, bio) : null));
+    }))));
   }
 
   const about = pick(page.description ?? '', page.description_ar, lang);
@@ -331,7 +357,7 @@ function gymBody(step: GymStep, page: GymPage, lang: Lang, on: GymHandlers): HTM
   /* ── class times (from the timetable), collapsed like the app's Hours ── */
   if (page.class_hours.length) {
     const toggle = h('button', { class: 'gp-toggle', type: 'button', 'aria-expanded': step.hoursOpen ? 'true' : 'false' },
-      h('span', {}, t.classTimes), h('span', { class: `disclose${step.hoursOpen ? ' open' : ''}`, 'aria-hidden': 'true' }));
+      h('span', {}, appt ? t.sessionTimes : t.classTimes), h('span', { class: `disclose${step.hoursOpen ? ' open' : ''}`, 'aria-hidden': 'true' }));
     toggle.addEventListener('click', on.onToggleHours);
     const rows = step.hoursOpen
       ? h('dl', { class: 'gp-hours' }, ...page.class_hours.map((r) =>
@@ -356,27 +382,47 @@ function plusDays(ymd: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/* a trainer's photo, or their initial when there is none (or it fails) */
+function trainerPhoto(p: Trainer): HTMLElement {
+  if (!p.photo_url) return initial(p.name, 'avatar');
+  const img = h('img', { class: 'avatar', src: p.photo_url, alt: '', loading: 'lazy', decoding: 'async' });
+  img.addEventListener('error', () => img.replaceWith(initial(p.name, 'avatar')), { once: true });
+  return img;
+}
+
 /* ── Class: which class at the time picked ──────────────────────────────── */
 
+/* For a 1:1 appointment the options are the same session with different
+   trainers, so this is the trainer picker. */
 export function viewClassPick(
-  start: string, options: ClassSlot[], lang: Lang, onBack: () => void, onPick: (s: ClassSlot) => void
+  start: string, options: ClassSlot[], lang: Lang, onBack: () => void, onPick: (s: ClassSlot) => void,
+  staff: Trainer[] = []
 ): HTMLElement {
   const t = strings(lang);
   const ladies = options.some((s) => s.ladies_only);
+  const trainers = options.length > 0 && options.every((s) => s.trainer_info);
+  /* photos come from the page's trainer list, not from every slot */
+  const photoOf = (tr: Trainer) => staff.find((p) => p.id === tr.id)?.photo_url ?? tr.photo_url;
   return h('section', { class: 'card pad' },
-    header(lang, onBack, t.chooseClass, dateTimeLabel(start, lang)),
+    header(lang, onBack, trainers ? t.chooseTrainer : t.chooseClass, dateTimeLabel(start, lang)),
     ladies ? h('p', { class: 'women-note', role: 'note' }, `${LADIES_MARK} ${t.womenOnlyNote}`) : null,
     h('ul', { class: 'pick-list' }, ...options.map((s) => {
       const meta = [
+        trainers ? pick(s.class_full || s.class, s.class_full_ar || s.class_ar, lang) : null,
         s.duration_min !== undefined ? durationLabel(s.duration_min, lang) : null,
         s.price_qar !== undefined ? priceLabel(s.price_qar, lang) : null
       ].filter(Boolean).join(' · ');
-      const btn = h('button', { class: 'pick tappable', type: 'button' },
+      const tr = s.trainer_info;
+      const title = tr ? pick(tr.title ?? '', tr.title_ar, lang) : '';
+      const btn = h('button', { class: `pick tappable${tr ? ' with-avatar' : ''}`, type: 'button' },
+        tr ? trainerPhoto({ ...tr, photo_url: photoOf(tr) }) : null,
         h('span', { class: 'pick-main' },
-          h('span', { class: 'pick-name' }, h('span', {}, pick(s.class_full || s.class, s.class_full_ar || s.class_ar, lang)),
+          h('span', { class: 'pick-name' },
+            h('span', {}, tr ? tr.name : pick(s.class_full || s.class, s.class_full_ar || s.class_ar, lang)),
             s.ladies_only ? ladiesTag(lang) : null),
+          title ? h('span', { class: 'pick-meta' }, title) : null,
           meta ? h('span', { class: 'pick-meta' }, meta) : null,
-          s.description ? h('span', { class: 'pick-desc' }, s.description) : null),
+          !tr && s.description ? h('span', { class: 'pick-desc' }, s.description) : null),
         h('span', { class: 'chev fwd', 'aria-hidden': 'true' }));
       btn.addEventListener('click', () => onPick(s));
       return h('li', {}, btn);
@@ -573,6 +619,7 @@ function summaryRows(c: Choice, slot: Slot, lang: Lang, full: boolean): HTMLElem
   return h('dl', { class: 'rows summary' },
     row(t.business, business),
     row(t.service, service + (c.duration_min !== undefined ? ` · ${durationLabel(c.duration_min, lang)}` : '')),
+    slot.trainer ? row(t.trainer, slot.trainer.name) : null,
     row(t.when, when),
     price ? row(full ? t.payment : t.price, price) : null,
     full && cancel ? row(t.cancellation, cancel) : null
@@ -649,10 +696,61 @@ export function viewDetails(s: DetailsState, lang: Lang, on: DetailsHandlers): H
   );
 }
 
+/* ── Requirements: questions and notices before the request ─────────────── */
+
+export type RequirementsState = { choice: Choice; slot: Slot; answers: Answers };
+
+/* the note shown for answers that need the business's attention, once each */
+function flagNote(reqs: Requirement[], answers: Answers, lang: Lang): HTMLElement | null {
+  const notes = [...new Set(flaggedBy(reqs, answers).map((r) => pick(r.flag_note ?? '', r.flag_note_ar, lang)).filter(Boolean))];
+  return notes.length ? h('div', { class: 'flag-note', role: 'status' }, ...notes.map((n) => h('p', {}, n))) : null;
+}
+
+/* Yes/No per question (nothing preselected: the customer answers each one),
+   a checkbox per notice; Continue only once everything is answered. */
+export function viewRequirements(
+  s: RequirementsState, lang: Lang, on: { onBack: () => void; onAnswer: (id: string, value: boolean) => void; onContinue: () => void }
+): HTMLElement {
+  const t = strings(lang);
+  const reqs = s.choice.requirements ?? [];
+  const done = answered(reqs, s.answers);
+
+  const items = reqs.map((r, i) => {
+    const text = pick(r.text, r.text_ar, lang);
+    if (r.kind === 'notice') {
+      const box = h('input', { type: 'checkbox', id: `rq-${i}`, checked: s.answers[r.id] === true });
+      box.addEventListener('change', () => on.onAnswer(r.id, (box as HTMLInputElement).checked));
+      return h('li', { class: 'rq notice' }, h('label', { for: `rq-${i}`, class: 'rq-check' }, box, h('span', {}, text)));
+    }
+    const choice = (value: boolean) => {
+      const isOn = s.answers[r.id] === value;
+      const btn = h('button', { class: `rq-opt${isOn ? ' on' : ''}`, type: 'button', 'aria-pressed': isOn ? 'true' : 'false' },
+        value ? t.yes : t.no);
+      btn.addEventListener('click', () => on.onAnswer(r.id, value));
+      return btn;
+    };
+    return h('li', { class: 'rq' },
+      h('p', { class: 'rq-text', id: `rq-${i}` }, text),
+      h('div', { class: 'rq-opts', role: 'group', 'aria-labelledby': `rq-${i}` }, choice(true), choice(false)));
+  });
+
+  const next = h('button', { class: 'btn accent', type: 'button', disabled: !done }, t.continue);
+  next.addEventListener('click', () => { if (done) on.onContinue(); });
+
+  return h('section', { class: 'card pad' },
+    header(lang, on.onBack, t.beforeYouBook, pick(s.choice.business_name, s.choice.business_name_ar, lang)),
+    h('p', { class: 'meta' }, t.requirementsIntro),
+    h('ul', { class: 'rq-list' }, ...items),
+    flagNote(reqs, s.answers, lang),
+    done ? null : h('p', { class: 'caption', role: 'status' }, t.answerAll),
+    next
+  );
+}
+
 /* ── Review: everything once more, then the request ─────────────────────── */
 
 export type ReviewState = {
-  choice: Choice; slot: Slot; name: string; phone: string;
+  choice: Choice; slot: Slot; name: string; phone: string; answers?: Answers;
   error?: BookingErrorKind; retime?: boolean; busy?: boolean;
 };
 
@@ -676,8 +774,10 @@ export function viewReview(s: ReviewState, lang: Lang, on: { onBack: () => void;
     summaryRows(s.choice, s.slot, lang, true),
     h('dl', { class: 'rows' },
       row(t.yourName, s.name),
-      row(t.yourMobile, s.phone, 'ref')
+      row(t.yourMobile, s.phone, 'ref'),
+      s.choice.requirements?.length ? row(t.beforeYouBook, t.answersGiven) : null
     ),
+    s.choice.requirements?.length ? flagNote(s.choice.requirements, s.answers ?? {}, lang) : null,
     h('p', { class: 'request-note' }, t.requestNote(business)),
     s.error ? h('div', { class: 'form-error', role: 'alert' }, h('p', {}, t.bookErrors[s.error])) : null,
     action
@@ -706,9 +806,12 @@ export function viewBooked(r: BookingResult, lang: Lang, cancellationHours?: num
     h('dl', { class: 'rows' },
       row(t.business, business),
       row(t.service, service),
+      r.trainer ? row(t.trainer, r.trainer) : null,
       row(t.when, dateTimeLabel(r.start, lang)),
       row(t.reference, r.reference, 'ref')
     ),
+    r.health_note ? h('div', { class: 'flag-note', role: 'status' },
+      h('p', {}, lang === 'ar' ? r.health_note_ar || r.health_note : r.health_note)) : null,
     /* pay-at-venue: say where the money goes, so nobody looks for a checkout */
     r.price_qar != null && r.pay_at_venue ? h('p', { class: 'caption' }, payNote(r.price_qar, lang, r)) : null,
     cancel ? h('p', { class: 'caption' }, cancel) : null,

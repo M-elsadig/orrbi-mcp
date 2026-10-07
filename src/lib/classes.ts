@@ -1,6 +1,7 @@
 import { addDays, qatarLabel, todayInQatar, toQatarIso } from './time.js';
 import { LADIES_SUFFIX } from './availability.js';
-import { BOOKING_CUTOFF_MS } from './cutoff.js';
+import { cutoffMs } from './cutoff.js';
+import { type StaffRow, type Trainer, toTrainer, withTrainer } from './staff.js';
 
 /* find_classes: open class times across every gym and class, for asks with
    a time in them ("tonight", "tomorrow morning", "Tuesday 6pm"). The tool
@@ -33,8 +34,10 @@ export type ClassRow = {
   };
   businesses: {
     name_en: string; name_ar: string | null; area: string; category: string;
-    pay_at_venue: boolean | null; cancellation_hours: number | null;
+    pay_at_venue: boolean | null; cancellation_hours: number | null; booking_cutoff_min?: number | null;
   };
+  /* the trainer of a 1:1 appointment slot; null for group classes */
+  staff?: StaffRow | null;
 };
 
 export type ClassSlot = {
@@ -48,6 +51,8 @@ export type ClassSlot = {
   start: string;
   start_label: string;
   ladies_only: boolean;
+  /* 1:1 appointments: who it is with */
+  trainer?: string;
 };
 
 /* what the card also gets (Arabic, full names, price for the booking step) */
@@ -62,6 +67,7 @@ export type ClassSlotUi = ClassSlot & {
   price_qar: number;
   pay_at_venue: boolean;
   duration_min: number;
+  trainer_info?: Trainer;
 };
 
 export type ClassFilter = {
@@ -96,13 +102,13 @@ function inWindow(d: Date, f: ClassFilter): boolean {
 }
 
 /* Bookable slots that answer the question, in time order. Never offers a
-   slot starting within the booking cutoff (90 min: the request needs
+   slot starting within its business's booking cutoff (the request needs
    confirming), and never a full one. */
 export function pickSlots(rows: ClassRow[], filter: ClassFilter, now: number): ClassSlotUi[] {
   return rows
     .filter((r) => {
       const start = new Date(r.starts_at);
-      if (start.getTime() <= now + BOOKING_CUTOFF_MS) return false;
+      if (start.getTime() <= now + cutoffMs(r.businesses.booking_cutoff_min)) return false;
       if (Number(r.capacity) - Number(r.booked_count) <= 0) return false;
       if (filter.ladiesOnly !== undefined && Boolean(r.ladies_only) !== filter.ladiesOnly) return false;
       return inWindow(start, filter);
@@ -115,6 +121,7 @@ function toSlot(r: ClassRow): ClassSlotUi {
   const start = new Date(r.starts_at);
   const ladies = Boolean(r.ladies_only);
   const s = r.services, b = r.businesses;
+  const trainer = toTrainer(r.staff);
   return {
     slot_id: r.id,
     business_id: r.business_id,
@@ -124,8 +131,9 @@ function toSlot(r: ClassRow): ClassSlotUi {
     class: s.short_name_en || s.name_en,
     start: toQatarIso(start),
     /* the label the model reads out says "Ladies only" itself */
-    start_label: qatarLabel(start) + (ladies ? LADIES_SUFFIX : ''),
+    start_label: withTrainer(qatarLabel(start) + (ladies ? LADIES_SUFFIX : ''), trainer),
     ladies_only: ladies,
+    ...(trainer ? { trainer: trainer.name, trainer_info: trainer } : {}),
     date: todayInQatar(start),
     class_full: s.name_en,
     class_ar: s.short_name_ar || s.name_ar,
@@ -141,8 +149,11 @@ function toSlot(r: ClassRow): ClassSlotUi {
 
 /* The model's copy: just enough to answer and to book */
 export function forModel(s: ClassSlotUi): ClassSlot {
-  const { slot_id, business_id, business_name, area, service_id, start, start_label, ladies_only } = s;
-  return { slot_id, business_id, business_name, area, service_id, class: s.class, start, start_label, ladies_only };
+  const { slot_id, business_id, business_name, area, service_id, start, start_label, ladies_only, trainer } = s;
+  return {
+    slot_id, business_id, business_name, area, service_id, class: s.class, start, start_label, ladies_only,
+    ...(trainer ? { trainer } : {})
+  };
 }
 
 /* [date, date + days) as Qatar days → the UTC range to query */
@@ -165,7 +176,9 @@ export function nextTimes(slots: ClassSlotUi[], max = 3): NextTime[] {
     const key = `${s.start}|${s.ladies_only}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ start: s.start, start_label: s.start_label, date: s.date, ladies_only: s.ladies_only });
+    /* one chip stands for every trainer free then, so it names none */
+    const label = s.trainer ? s.start_label.replace(` · with ${s.trainer}`, '') : s.start_label;
+    out.push({ start: s.start, start_label: label, date: s.date, ladies_only: s.ladies_only });
     if (out.length === max) break;
   }
   return out;

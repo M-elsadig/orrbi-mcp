@@ -6,7 +6,9 @@ import { cleanText, fail, guard, ok } from '../lib/results.js';
 import { languageInput } from '../lib/language.js';
 import { categoryOf, resolveCategory } from '../lib/category.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
-import { type TemplateRow, weeklyTimes } from '../lib/schedule.js';
+import { type TemplateRow, appointmentHours, weeklyTimes } from '../lib/schedule.js';
+import { REQUIREMENTS_NOTE, type Requirement, forService, loadRequirements, requirementOut } from '../lib/requirements.js';
+import { requirementSchema } from './getAvailability.js';
 import { type PartOfDay, parseClock } from '../lib/classes.js';
 import { openSlots } from '../lib/openSlots.js';
 import { DONT_REPEAT, type GymRow, gymCard, gymCardOut } from '../lib/cards.js';
@@ -22,7 +24,12 @@ const serviceOut = z.object({
   price_label: z.string().optional(),
   /* "Sun 8:30 AM (ladies only), 5:15 PM; Tue …" from the weekly timetable */
   weekly_times: z.string().optional(),
-  has_ladies_only_times: z.boolean().optional()
+  has_ladies_only_times: z.boolean().optional(),
+  /* 1:1 appointments: one trainer per booking, times every 30 min */
+  appointment: z.boolean().optional(),
+  trainers: z.array(z.string()).optional(),
+  appointment_hours: z.string().optional(),
+  requirements: z.array(requirementSchema).optional()
 });
 
 /* listed so the model can answer "how much is a PT session?", never booked */
@@ -94,6 +101,8 @@ export function registerSearchBusinesses(server: McpServer) {
         'Quote prices with price_label: when it says "pay at the gym", the customer pays there and Orrbi only reserves the spot. ' +
         'other_services are for information only and cannot be booked through Orrbi. ' +
         'weekly_times is the regular timetable of each class (Qatar time), so you can tell which class runs on which day; ladies-only is per time, marked "(ladies only)". ' +
+        'appointment: true marks a private 1:1 session with a trainer the user picks (trainers); appointment_hours gives the first to last start time per day. ' +
+        'requirements (e.g. a health screening) must be answered by the user before create_booking. ' +
         'Never invent ids, prices or businesses. If nothing matches, say so and offer to search with fewer filters. ' +
         'After the card, ask in one short sentence which place or time suits them; do not check availability for every business or service.',
       inputSchema: {
@@ -166,18 +175,29 @@ export function registerSearchBusinesses(server: McpServer) {
       const found = (data ?? []) as unknown as Row[];
 
       /* the weekly timetable of every class found, in one query */
-      const timetable = new Map<string, TemplateRow[]>();
+      type Template = TemplateRow & { service_id: string; staff: { name: string; is_active: boolean } | null };
+      const timetable = new Map<string, Template[]>();
+      let requirements = new Map<string, Requirement[]>();
       if (found.length) {
-        const t = await db().from('schedule_templates')
-          .select('service_id,weekday,start_time,ladies_only,bookable')
-          .in('business_id', found.map((b) => b.id))
-          .eq('is_active', true);
+        const ids = found.map((b) => b.id);
+        const [t, reqs] = await Promise.all([
+          db().from('schedule_templates')
+            .select('service_id,weekday,start_time,ladies_only,bookable,staff(name,is_active)')
+            .in('business_id', ids)
+            .eq('is_active', true),
+          loadRequirements(ids)
+        ]);
         if (t.error) throw t.error;
-        for (const r of (t.data ?? []) as (TemplateRow & { service_id: string })[]) {
+        requirements = reqs;
+        for (const r of (t.data ?? []) as unknown as Template[]) {
+          if (r.staff && !r.staff.is_active) continue;
           timetable.set(r.service_id, [...(timetable.get(r.service_id) ?? []), r]);
         }
       }
       const hasLadies = (serviceId: string) => (timetable.get(serviceId) ?? []).some((r) => r.bookable && r.ladies_only);
+      /* a service whose timetable has trainers is a 1:1 appointment */
+      const trainersOf = (serviceId: string) =>
+        [...new Set((timetable.get(serviceId) ?? []).filter((r) => r.bookable && r.staff).map((r) => r.staff!.name))].sort();
 
       /* bookable services become `services`; info-only ones `other_services`.
          Ladies-only is per time, not per class: with ladies_only, a class
@@ -194,7 +214,7 @@ export function registerSearchBusinesses(server: McpServer) {
 
       /* Answer first: the times that fit what was asked ("tonight" → only
          tonight's), else simply the next open ones. Same rules as
-         find_classes: never within the 90-minute booking cutoff, never full. */
+         find_classes: never within the business's booking cutoff, never full. */
       const timed = !!(args.date || args.around_time || (args.part_of_day && args.part_of_day !== 'any'));
       const date = args.date ?? today;
       const days = args.days ?? (timed ? 1 : 7);
@@ -217,18 +237,27 @@ export function registerSearchBusinesses(server: McpServer) {
         cancellation_policy: cancellationText(b.cancellation_hours),
         first_visit: b.first_visit_note_en,
         next_times: gyms[i].next_times.map((t) => t.start_label),
-        services: bookable.map((s) => ({
-          service_id: s.id,
-          name: s.name_en,
-          description: s.description_en,
-          duration_min: Number(s.duration_min),
-          price_qar: Number(s.price),
-          price_label: priceText({ price_qar: Number(s.price), pay_at_venue: b.pay_at_venue, category: b.category }),
-          ...(timetable.has(s.id) ? {
-            weekly_times: weeklyTimes(timetable.get(s.id)!, ladies_only ? true : undefined) ?? undefined,
-            has_ladies_only_times: hasLadies(s.id)
-          } : {})
-        })),
+        services: bookable.map((s) => {
+          const trainers = trainersOf(s.id);
+          const reqs = forService(requirements.get(b.id) ?? [], s.id).map(requirementOut);
+          return {
+            service_id: s.id,
+            name: s.name_en,
+            description: s.description_en,
+            duration_min: Number(s.duration_min),
+            price_qar: Number(s.price),
+            price_label: priceText({ price_qar: Number(s.price), pay_at_venue: b.pay_at_venue, category: b.category }),
+            ...(trainers.length ? {
+              appointment: true,
+              trainers,
+              appointment_hours: appointmentHours(timetable.get(s.id)!) ?? undefined
+            } : timetable.has(s.id) ? {
+              weekly_times: weeklyTimes(timetable.get(s.id)!, ladies_only ? true : undefined) ?? undefined,
+              has_ladies_only_times: hasLadies(s.id)
+            } : {}),
+            ...(reqs.length ? { requirements: reqs } : {})
+          };
+        }),
         ...(info.length ? {
           other_services: info.map((s) => ({
             name: s.name_en,
@@ -247,6 +276,7 @@ export function registerSearchBusinesses(server: McpServer) {
         if (next) notes.push('Nothing is open at the time asked for; next_times are the next open times instead. Say so in one sentence.');
         else if (timed && !slots.length) notes.push('Nothing is open at the time asked for. Say so, and offer another day.');
         notes.push(DONT_REPEAT);
+        if (businesses.some((b) => b.services.some((s) => s.requirements))) notes.push(REQUIREMENTS_NOTE);
       }
       const note = notes.length ? { note: notes.join(' ') } : {};
 

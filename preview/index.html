@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Partner Preview</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f4ed;
+      --panel: #ffffff;
+      --text: #141413;
+      --muted: #73726c;
+      --line: rgb(31 30 29 / 0.15);
+      --warn-bg: #f6eedf;
+      --warn: #5a4815;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #262624; --panel: #30302e; --text: #faf9f5; --muted: #9c9a92; --line: rgb(222 220 209 / 0.15);
+        --warn-bg: #483a0f; --warn: #d1a041;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #262624; --panel: #30302e; --text: #faf9f5; --muted: #9c9a92; --line: rgb(222 220 209 / 0.15);
+      --warn-bg: #483a0f; --warn: #d1a041;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: grid; gap: 12px; justify-items: center;
+    }
+    .bar { width: min(100%, 420px); display: grid; gap: 8px; }
+    .banner { padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    button {
+      min-height: 36px; padding: 0 14px; border-radius: 999px; border: 0.5px solid var(--line);
+      background: var(--panel); color: var(--text); font: inherit; cursor: pointer;
+    }
+    button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    #stage {
+      width: min(100%, 390px); height: 460px; border-radius: 14px; overflow: hidden;
+      border: 0.5px solid var(--line); background: var(--panel); position: relative;
+      transition: height 200ms ease;
+    }
+    #stage[data-mode="fullscreen"] { height: min(844px, calc(100dvh - 140px)); }
+    #close { display: none; position: absolute; top: 8px; inset-inline-end: 8px; z-index: 2; min-height: 30px; }
+    #stage[data-mode="fullscreen"] #close { display: block; }
+    iframe { width: 100%; height: 100%; border: 0; display: block; background: transparent; }
+    #log { width: min(100%, 420px); margin: 0; padding-inline-start: 18px; color: var(--muted); font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <p class="banner">Preview of an inactive business. Not visible to customers. “Send booking request” is stubbed: nothing is sent or saved.</p>
+    <div class="row">
+      <button type="button" data-lang="en" aria-pressed="true">English</button>
+      <button type="button" data-lang="ar" aria-pressed="false">العربية</button>
+    </div>
+  </div>
+  <div id="stage" data-mode="inline">
+    <button id="close" type="button" aria-label="Close fullscreen">Close</button>
+    <iframe id="widget" title="Orrbi card" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
+  </div>
+  <ul id="log" aria-live="polite"></ul>
+  <script type="module" src="./host.ts"></script>
+</body>
+</html>

@@ -5,4 +5,6 @@ node_modules/
 .vercel/
 dist/
 ui/dist/
+preview/dist/
+preview/.data/
 *.log

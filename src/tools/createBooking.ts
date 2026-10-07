@@ -3,13 +3,15 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool } from '@modelcontextprotocol/ext-apps/server';
 import { db } from '../lib/supabase.js';
 import { fail, failUnexpected, guard, ok } from '../lib/results.js';
-import { reportError } from '../lib/errors.js';
+import { reportError, withoutAnswers } from '../lib/errors.js';
 import { PHONE_MESSAGE, normalizeQatarPhone } from '../lib/phone.js';
 import { qatarLabel, toQatarIso } from '../lib/time.js';
 import { notifyBookingCreated } from '../lib/webhook.js';
 import { notifyTelegram, sendTelegram } from '../lib/telegram.js';
 import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
-import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../lib/cutoff.js';
+import { cutoffMs, cutoffText } from '../lib/cutoff.js';
+import { type Requirement, checkAnswers, flagNotes, forService, loadRequirements } from '../lib/requirements.js';
+import { type StaffRow, toTrainer } from '../lib/staff.js';
 import { WIDGET_URI } from '../widget.js';
 import { languageInput } from '../lib/language.js';
 
@@ -32,7 +34,11 @@ const DB_ERRORS: Record<string, string> = {
   TOO_MANY_PENDING:
     'This phone number already has 3 booking requests waiting for confirmation. Please wait until the businesses confirm those before booking more.',
   REQUEST_ID_REUSED:
-    'This request_id was already used for a different booking. Use a new request_id for a new booking.'
+    'This request_id was already used for a different booking. Use a new request_id for a new booking.',
+  REQUIREMENTS_NOT_CONFIRMED:
+    'This business needs every pre-booking requirement answered first. Ask the user each one (from get_availability or search_businesses), then try again with their answers in requirements.',
+  REQUIREMENTS_MISMATCH:
+    'Some requirements answers are not for this business or service. Use the requirement ids from get_availability for this service.'
 };
 
 /* After this many no-shows a number can't book through Orrbi. */
@@ -69,7 +75,10 @@ export function registerCreateBooking(server: McpServer) {
         'the customer pays at the business; say so, and never say they paid or will pay through Orrbi. ' +
         'BEFORE calling this tool you MUST read back to the user, and get their explicit "yes" to, all of: ' +
         'the business name, the service, the date and time (Qatar time, from get_availability start_label), the price as price_label gives it, ' +
-        'the customer\'s name, and their Qatar mobile number. Never call it on a guess or without that confirmation. ' +
+        'the customer\'s name, and their Qatar mobile number, and for a 1:1 appointment the trainer. Never call it on a guess or without that confirmation. ' +
+        'If the business has requirements (returned by get_availability / search_businesses, e.g. a health screening), ask the user each one word for word ' +
+        'and pass their answers as requirements: [{id, answer}] (questions: true = yes, false = no; notices: true once they agree). ' +
+        'Never answer for the user or assume an answer; without every answer the booking is refused. ' +
         'Use business_id/service_id from search_businesses and slot_id from get_availability; never invent ids. ' +
         'Generate a request_id (e.g. a UUID) for each new booking and send the same request_id if you retry, so the booking is not made twice. ' +
         'If the slot is full, call get_availability again and offer other times. ' +
@@ -92,6 +101,11 @@ export function registerCreateBooking(server: McpServer) {
           .describe('Optional note for the business, e.g. "first visit".'),
         request_id: z.string().trim().min(1).max(100, 'request_id must be 100 characters or fewer').optional()
           .describe('Idempotency key. Generate one per new booking and reuse it on retries.'),
+        requirements: z.array(z.object({
+          id: z.uuid('id must be a requirement id from get_availability'),
+          answer: z.boolean()
+        })).max(50).optional()
+          .describe('The user\'s own answers to the business\'s requirements: question → true (yes) / false (no); notice → true once they agree. Required when the business has requirements.'),
         language: languageInput
       },
       outputSchema: {
@@ -113,6 +127,9 @@ export function registerCreateBooking(server: McpServer) {
         pay_at_venue: z.boolean().optional(),
         category: z.string().nullable().optional(),
         first_visit_ar: z.string().nullable().optional(),
+        trainer: z.string().optional(),
+        health_note: z.string().optional(),
+        health_note_ar: z.string().nullable().optional(),
         message: z.string()
       },
       annotations: {
@@ -129,8 +146,9 @@ export function registerCreateBooking(server: McpServer) {
       if (!phone) return fail(PHONE_MESSAGE);
 
       /* the owner's Telegram ping carries the full arguments, phone included,
-         so a booking that fails unexpectedly still reaches them */
-      const unexpected = (where: string, e: unknown) => failUnexpected(where, e, args);
+         so a booking that fails unexpectedly still reaches them. Not the
+         requirement answers: those are health data. */
+      const unexpected = (where: string, e: unknown) => failUnexpected(where, e, safeArgs(args));
 
       const owner = process.env.ORRBI_MCP_USER_ID;
       if (!owner) return unexpected('create_booking.config', new Error('ORRBI_MCP_USER_ID is not set'));
@@ -144,16 +162,30 @@ export function registerCreateBooking(server: McpServer) {
       }
 
       /* a request needs confirming by hand, so nothing starting within the
-         booking cutoff can be booked (no tool offers those either). The
-         cancellation window is a policy, not a cutoff. */
+         business's booking cutoff can be booked (no tool offers those
+         either). The cancellation window is a policy, not a cutoff. */
       if (ctx.slot_starts_at) {
         const lead = new Date(ctx.slot_starts_at).getTime() - Date.now();
-        /* same edge as the lists: a time exactly 90 minutes away is neither offered nor bookable */
-        if (lead > 0 && lead <= BOOKING_CUTOFF_MS) {
-          return fail(`That time starts in ${BOOKING_CUTOFF_MIN} minutes or less, too soon to book through Orrbi: ` +
+        /* same edge as the lists: a time exactly at the cutoff is neither offered nor bookable */
+        if (lead > 0 && lead <= cutoffMs(ctx.booking_cutoff_min)) {
+          return fail(`That time starts in ${cutoffText(ctx.booking_cutoff_min)} or less, too soon to book through Orrbi: ` +
             `${ctx.business_name ?? 'the business'} needs time to confirm. Call get_availability again and offer the user a later time.`);
         }
       }
+
+      /* pre-booking requirements (e.g. health screening). The database
+         refuses a booking without them too; this check says which ones are
+         missing, and works out the flagged answers for the alert. Not best
+         effort: a flagged answer must never go unnoticed. */
+      const reqs = forService((await loadRequirements([args.business_id])).get(args.business_id) ?? [], args.service_id);
+      const answers = checkAnswers(reqs, args.requirements);
+      if (!answers.ok) {
+        if (answers.reason === 'unknown') return fail(DB_ERRORS.REQUIREMENTS_MISMATCH);
+        return fail(`Before booking, ${ctx.business_name ?? 'the business'} needs the user's own answer to: ` +
+          answers.missing.map((r) => `"${r.text}"${r.kind === 'notice' ? ' (they must agree)' : ' (yes or no)'}`).join('; ') +
+          '. Ask the user these word for word, never answer for them, then call create_booking again with requirements.');
+      }
+      const flagged: Requirement[] = answers.flagged;
 
       /* customers pay at the gym, so a no-show costs the business a spot:
          after NO_SHOW_LIMIT of them the number can't book any more */
@@ -178,7 +210,8 @@ export function registerCreateBooking(server: McpServer) {
         p_customer_name: args.customer_name,
         p_customer_phone: phone,
         p_notes: args.notes || null,
-        p_request_id: args.request_id || null
+        p_request_id: args.request_id || null,
+        p_requirements: reqs.length ? args.requirements ?? [] : null
       };
 
       let res = await db().rpc('create_guest_booking', params);
@@ -202,6 +235,9 @@ export function registerCreateBooking(server: McpServer) {
       const startLabel = qatarLabel(row.starts_at);
       const pay = ctx.price == null ? null : { price_qar: ctx.price, pay_at_venue: ctx.pay_at_venue, category: ctx.category };
       const priceLabel = pay ? priceText(pay) : null;
+      const trainer = ctx.trainer?.name ?? null;
+      const healthNote = flagNotes(flagged).join(' ') || null;
+      const healthNoteAr = [...new Set(flagged.map((r) => r.flag_note_ar).filter(Boolean))].join(' ') || null;
 
       /* a retried request_id already notified everyone the first time.
          Neither notification can throw. */
@@ -225,7 +261,10 @@ export function registerCreateBooking(server: McpServer) {
             start_label: startLabel,
             customer_name: args.customer_name,
             customer_phone: phone,
-            notes: args.notes || null
+            notes: args.notes || null,
+            trainer,
+            /* whether, never what: the answers stay in booking_contacts */
+            health_flag: flagged.length > 0
           }),
           notifyTelegram({
             booking_id: row.booking_id,
@@ -244,7 +283,9 @@ export function registerCreateBooking(server: McpServer) {
             venue_cancellation_hours: ctx.venue_cancellation_hours,
             first_visit_note_ar: ctx.first_visit_note_ar,
             booking_contact: ctx.booking_contact,
-            ladies_only: ctx.slot_ladies_only
+            ladies_only: ctx.slot_ladies_only,
+            trainer,
+            health_flags: flagged.map((r) => r.text)
           })
         ]);
 
@@ -272,9 +313,13 @@ export function registerCreateBooking(server: McpServer) {
         ...(cancellation ? { cancellation_policy: cancellation } : {}),
         ...(ctx.first_visit_note_en ? { first_visit: ctx.first_visit_note_en } : {}),
         ...(ctx.slot_ladies_only ? { ladies_only: true } : {}),
+        ...(trainer ? { trainer } : {}),
+        ...(healthNote ? { health_note: healthNote } : {}),
         message: [
-          `Your booking request for ${row.service_name}${ctx.slot_ladies_only ? ' (ladies-only class)' : ''} at ${row.business_name} on ${startLabel} (Qatar time) has been sent and is pending.`,
+          `Your booking request for ${row.service_name}${trainer ? ` with ${trainer}` : ''}${ctx.slot_ladies_only ? ' (ladies-only class)' : ''} ` +
+            `at ${row.business_name} on ${startLabel} (Qatar time) has been sent and is pending.`,
           `You'll get a WhatsApp confirmation once ${row.business_name} confirms it.`,
+          healthNote,
           payment,
           cancellation,
           ctx.first_visit_note_en ? `First visit: ${ctx.first_visit_note_en}` : null,
@@ -291,10 +336,16 @@ export function registerCreateBooking(server: McpServer) {
         price_qar: ctx.price,
         pay_at_venue: ctx.pay_at_venue,
         category: ctx.category,
-        first_visit_ar: ctx.first_visit_note_ar
+        first_visit_ar: ctx.first_visit_note_ar,
+        ...(healthNote ? { health_note_ar: healthNoteAr } : {})
       }, answer);
-    }, args)
+    }, safeArgs(args))
   );
+}
+
+/* The arguments as error context: requirement answers (health data) only as a count */
+function safeArgs<T extends { requirements?: unknown }>(args: T): Omit<T, 'requirements'> & { requirements?: string } {
+  return { ...args, requirements: withoutAnswers(args.requirements) };
 }
 
 /* Best effort: a failed lookup must not stop a booking. */
@@ -326,6 +377,8 @@ type BookingContext = {
   booking_contact: { name: string | null; phone: string } | null;
   slot_starts_at: string | null;
   slot_ladies_only: boolean;
+  booking_cutoff_min: number | null;
+  trainer: { id: string; name: string } | null;
 };
 
 /* Everything about the business and service the booking needs beyond what
@@ -337,14 +390,17 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
     const signal = AbortSignal.timeout(2000);
     const [b, s, p, a] = await Promise.all([
       db().from('businesses')
-        .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,first_visit_note_en,first_visit_note_ar')
+        .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,booking_cutoff_min,first_visit_note_en,first_visit_note_ar')
         .eq('id', businessId).abortSignal(signal).maybeSingle(),
       db().from('services').select('name_en,name_ar,price,bookable').eq('id', serviceId).abortSignal(signal).maybeSingle(),
       db().from('business_private').select('booking_contact_name,booking_contact_phone')
         .eq('business_id', businessId).abortSignal(signal).maybeSingle(),
-      db().from('availability').select('starts_at,ladies_only').eq('id', slotId).abortSignal(signal).maybeSingle()
+      db().from('availability').select('starts_at,ladies_only,staff(id,name,gender,title_en,title_ar,photo_url)')
+        .eq('id', slotId).abortSignal(signal).maybeSingle()
     ]);
     const price = s.data?.price;
+    const slot = a.data as { starts_at: string; ladies_only: boolean; staff: StaffRow | null } | null;
+    const trainer = toTrainer(slot?.staff);
     return {
       bookable: s.data ? Boolean(s.data.bookable) : null,
       business_name: b.data?.name_en ?? null,
@@ -361,15 +417,17 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
       booking_contact: p.data?.booking_contact_phone
         ? { name: p.data.booking_contact_name ?? null, phone: p.data.booking_contact_phone }
         : null,
-      slot_starts_at: a.data?.starts_at ?? null,
-      slot_ladies_only: Boolean(a.data?.ladies_only)
+      slot_starts_at: slot?.starts_at ?? null,
+      slot_ladies_only: Boolean(slot?.ladies_only),
+      booking_cutoff_min: b.data?.booking_cutoff_min ?? null,
+      trainer: trainer ? { id: trainer.id, name: trainer.name } : null
     };
   } catch {
     return {
       bookable: null, business_name: null, business_name_ar: null, service_name: null, service_name_ar: null,
       category: null, price: null, pay_at_venue: false, cancellation_hours: null, venue_cancellation_hours: null,
       first_visit_note_en: null, first_visit_note_ar: null, booking_contact: null,
-      slot_starts_at: null, slot_ladies_only: false
+      slot_starts_at: null, slot_ladies_only: false, booking_cutoff_min: null, trainer: null
     };
   }
 }

@@ -1,9 +1,12 @@
-import type { AvailabilityResult, BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Slot } from './types.js';
+import type { AvailabilityResult, BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Requirement, Slot } from './types.js';
 import type { BookingErrorKind, FieldErrors } from './booking.js';
 
 /* The booking flow inside one card, Google Maps style:
      search / find_classes   cards (carousel) → gym page → class → details → review → requested
      availability            times (one class) → details → review → requested
+   For a 1:1 appointment the "class" step picks the trainer (one slot per
+   trainer at the time picked). A business with pre-booking requirements
+   (e.g. a health screening) adds a requirements step after details.
    The gym page opens fullscreen where the host allows it. Pure state (no
    DOM) so it can be tested; the controller renders whatever step is on
    top. Each step keeps what it loaded, so Back is instant and never
@@ -24,7 +27,12 @@ export type Choice = {
   category?: string;
   /* the customer-facing window, said on the review step */
   cancellation_hours?: number | null;
+  /* what must be answered before booking this service; none = no step */
+  requirements?: Requirement[];
 };
+
+/* requirement id → the customer's answer */
+export type Answers = Record<string, boolean>;
 
 export type DetailsForm = { name: string; phone: string };
 
@@ -48,8 +56,10 @@ export type Step =
   /* data missing = loading; error set = failed */
   | { kind: 'times'; choice: Choice; data?: AvailabilityResult; error?: string; selected?: string }
   | { kind: 'details'; choice: Choice; slot: Slot; form: DetailsForm; fieldErrors: FieldErrors }
+  | { kind: 'requirements'; choice: Choice; slot: Slot; name: string; phone: string; answers: Answers }
   | {
       kind: 'review'; choice: Choice; slot: Slot; name: string; phone: string;
+      answers?: Answers;
       /* made once per review screen and reused on retries: no double booking */
       requestId: string;
       error?: BookingErrorKind; retime?: boolean; busy?: boolean;
@@ -139,9 +149,25 @@ export function classesAt(page: GymPage, start: string): ClassSlot[] {
   return page.week.slots.filter((s) => s.start === start);
 }
 
-/* A class picked on the gym page: the choice and the slot, ready to book.
-   Later steps name the class in full; chips used the short name. */
-export function fromClass(s: ClassSlot, cancellation_hours?: number | null): { choice: Choice; slot: Slot } {
+/* The requirements that apply to a service: its own and the business-wide ones */
+export function requirementsFor(page: Pick<GymPage, 'requirements'>, serviceId: string): Requirement[] {
+  return (page.requirements ?? []).filter((r) => !r.service_id || r.service_id === serviceId);
+}
+
+/* Every question answered yes or no, every notice agreed to */
+export function answered(reqs: Requirement[], answers: Answers): boolean {
+  return reqs.every((r) => (r.kind === 'notice' ? answers[r.id] === true : typeof answers[r.id] === 'boolean'));
+}
+
+/* The answers that need the business's attention */
+export function flaggedBy(reqs: Requirement[], answers: Answers): Requirement[] {
+  return reqs.filter((r) => r.flag_answer !== undefined && answers[r.id] === r.flag_answer);
+}
+
+/* A class (or trainer) picked on the gym page: the choice and the slot,
+   ready to book. Later steps name the class in full; chips used the short
+   name. */
+export function fromClass(s: ClassSlot, cancellation_hours?: number | null, requirements?: Requirement[]): { choice: Choice; slot: Slot } {
   const start = new Date(s.start).getTime();
   return {
     choice: {
@@ -155,14 +181,16 @@ export function fromClass(s: ClassSlot, cancellation_hours?: number | null): { c
       duration_min: s.duration_min,
       pay_at_venue: s.pay_at_venue,
       category: s.category,
-      cancellation_hours
+      cancellation_hours,
+      ...(requirements?.length ? { requirements } : {})
     },
     slot: {
       slot_id: s.slot_id,
       start: s.start,
       end: new Date(start + (s.duration_min ?? 60) * 60_000).toISOString(),
       start_label: s.start_label,
-      ladies_only: s.ladies_only
+      ladies_only: s.ladies_only,
+      ...(s.trainer_info ? { trainer: s.trainer_info } : {})
     }
   };
 }
@@ -180,6 +208,7 @@ export function choiceFromAvailability(r: AvailabilityResult): Choice | null {
     price_qar: r.price_qar,
     duration_min: r.duration_min,
     pay_at_venue: r.pay_at_venue,
-    category: r.category
+    category: r.category,
+    ...(r.requirements?.length ? { requirements: r.requirements } : {})
   };
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWeek, type SlotRow } from '../src/lib/availability.js';
-import { BOOKING_CUTOFF_MIN, BOOKING_CUTOFF_MS } from '../src/lib/cutoff.js';
+import { DEFAULT_BOOKING_CUTOFF_MIN, cutoffMin, cutoffMs, cutoffText } from '../src/lib/cutoff.js';
 import { dayChip, periodOf } from '../ui/src/i18n.js';
 
 /* starts_at as the database returns it (UTC); Qatar is UTC+3 */
@@ -73,8 +73,8 @@ test('ladies-only is per slot: filter either way, or both with the label saying 
   assert.equal(both[2].ladies_only, false);
 });
 
-test('nothing within the 90-minute booking cutoff is offered', () => {
-  const at = (utc: string) => buildWeek(tuesday, '2026-10-06', 60, Date.parse(utc), { minLeadMs: BOOKING_CUTOFF_MS })
+test('nothing within the 90-minute booking cutoff is offered (Aflete)', () => {
+  const at = (utc: string) => buildWeek(tuesday, '2026-10-06', 60, Date.parse(utc), { minLeadMs: cutoffMs(90) })
     .slots.map((s) => s.slot_id);
   /* Tue 1:00 PM Qatar: 4:00 PM is 3h away, inside the 4h cancellation window but bookable */
   assert.deepEqual(at('2026-10-06T10:00:00Z'), ['l1600', 'm1715', 'm1830']);
@@ -83,7 +83,56 @@ test('nothing within the 90-minute booking cutoff is offered', () => {
   /* exactly 90 min before 4:00 PM (2:30 PM Qatar) → not offered; 91 min → offered */
   assert.deepEqual(at('2026-10-06T11:30:00Z'), ['m1715', 'm1830']);
   assert.deepEqual(at('2026-10-06T11:29:00Z'), ['l1600', 'm1715', 'm1830']);
-  assert.equal(BOOKING_CUTOFF_MIN, 90);
+});
+
+test('the cutoff is per business: 2 hours hides what 90 minutes would offer', () => {
+  /* Tue 2:15 PM Qatar: 4:00 PM is 105 min away */
+  const now = Date.parse('2026-10-06T11:15:00Z');
+  const ids = (min: number) => buildWeek(tuesday, '2026-10-06', 60, now, { minLeadMs: cutoffMs(min) }).slots.map((s) => s.slot_id);
+  assert.deepEqual(ids(90), ['l1600', 'm1715', 'm1830']);
+  assert.deepEqual(ids(120), ['m1715', 'm1830']);
+  /* exactly 2 hours before 4:00 PM → not offered */
+  assert.deepEqual(buildWeek(tuesday, '2026-10-06', 60, Date.parse('2026-10-06T11:00:00Z'), { minLeadMs: cutoffMs(120) })
+    .slots.map((s) => s.slot_id), ['m1715', 'm1830']);
+});
+
+test('a missing or bad cutoff falls back to 90 minutes', () => {
+  assert.equal(DEFAULT_BOOKING_CUTOFF_MIN, 90);
+  assert.equal(cutoffMin(null), 90);
+  assert.equal(cutoffMin(undefined), 90);
+  assert.equal(cutoffMin(-5), 90);
+  assert.equal(cutoffMin('abc'), 90);
+  assert.equal(cutoffMin(120), 120);
+  assert.equal(cutoffMin(0), 0);
+  assert.equal(cutoffText(90), '90 minutes');
+  assert.equal(cutoffText(120), '2 hours');
+  assert.equal(cutoffText(60), '1 hour');
+});
+
+/* Studio 11: one slot per trainer at the same time */
+const aaron = { id: '11111111-1111-4111-8111-111111111111', name: 'Aaron Clarke', gender: 'male', title_en: 'Personal Trainer & EMS Specialist', title_ar: null, photo_url: null };
+const jackie = { id: '22222222-2222-4222-8222-222222222222', name: 'Jackie Mora', gender: 'female', title_en: null, title_ar: null, photo_url: 'https://evil.example.com/x.jpg' };
+const appts: SlotRow[] = [
+  { ...row('a10', '2026-10-08T07:00:00Z', 1), staff: aaron },     // Thu 10:00 AM Qatar
+  { ...row('j10', '2026-10-08T07:00:00Z', 1), staff: jackie },
+  { ...row('a1030', '2026-10-08T07:30:00Z', 1, 1), staff: aaron }  // taken
+];
+
+test('appointment slots name their trainer, and staff_id keeps one trainer', () => {
+  const w = buildWeek(appts, '2026-10-08', 30, NOW);
+  assert.deepEqual(w.slots.map((s) => s.slot_id), ['a10', 'j10']);
+  assert.equal(w.slots[0].start_label, 'Thu 8 Oct, 10:00 AM · with Aaron Clarke');
+  assert.equal(w.slots[0].trainer?.name, 'Aaron Clarke');
+  assert.equal(w.slots[0].trainer?.gender, 'male');
+  assert.equal(w.slots[0].end, '2026-10-08T10:30:00+03:00');
+  /* a photo outside our Storage is dropped */
+  assert.equal(w.slots[1].trainer?.photo_url, null);
+  assert.deepEqual(buildWeek(appts, '2026-10-08', 30, NOW, { staffId: jackie.id }).slots.map((s) => s.slot_id), ['j10']);
+});
+
+test('group class slots have no trainer', () => {
+  const w = buildWeek(tuesday, '2026-10-06', 60, MON);
+  assert.ok(w.slots.every((s) => !('trainer' in s)));
 });
 
 test('morning / afternoon / evening by Qatar hour', () => {

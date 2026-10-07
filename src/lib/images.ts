@@ -21,7 +21,8 @@ export function galleryImages(images: unknown, max = 8): string[] {
   return images.map(publicImage).filter((u): u is string => !!u).slice(0, max);
 }
 
-function publicImage(first: unknown): string | null {
+/* one photo (e.g. a trainer's), or null when it isn't in our Storage */
+export function publicImage(first: unknown): string | null {
   if (typeof first !== 'string' || !first) return null;
 
   let url: URL;

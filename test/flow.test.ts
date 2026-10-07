@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Flow, choiceFromAvailability, classesAt, fromClass, openGym, shownDay, slotsByDay, timesOn } from '../ui/src/flow.js';
+import {
+  Flow, answered, choiceFromAvailability, classesAt, flaggedBy, fromClass, openGym, requirementsFor, shownDay, slotsByDay, timesOn
+} from '../ui/src/flow.js';
 import { bookedNote, bookingArgs, classifyBookingError, newRequestId, validateDetails } from '../ui/src/booking.js';
-import type { BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Slot } from '../ui/src/types.js';
+import type { BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Requirement, Slot } from '../ui/src/types.js';
 
 const card: GymCard = {
   business_id: 'b1', name: 'Test Gym', name_ar: 'نادي التجربة', category: 'gym', area: 'West Bay',
@@ -158,4 +160,88 @@ test('booking errors map to card messages', () => {
   assert.deepEqual(c('This phone number already has 3 booking requests waiting for confirmation. Please wait...'), { kind: 'tooMany', retime: false });
   assert.deepEqual(c('Please give a Qatar mobile number: 8 digits, optionally starting with +974 or 00974'), { kind: 'phone', retime: false });
   assert.deepEqual(c('Something went wrong on our side.'), { kind: 'other', retime: false });
+});
+
+/* ── 1:1 appointments and pre-booking requirements (Studio 11) ── */
+
+const aaron = { id: 't-aaron', name: 'Aaron Clarke', gender: 'male' as const, title: 'Personal Trainer & EMS Specialist' };
+const jackie = { id: 't-jackie', name: 'Jackie Mora', gender: 'female' as const };
+const appt = (id: string, start: string, trainer: typeof aaron | typeof jackie): ClassSlot => ({
+  ...cls(id, start, 'discovery'), business_id: 'b11', business_name: 'Studio 11 Fitness', duration_min: 30, price_qar: 160,
+  trainer: trainer.name, trainer_info: trainer
+});
+const pacemaker: Requirement = {
+  id: 'r-pace', kind: 'question', text: 'Do you have a pacemaker?', flag_answer: true,
+  flag_note: 'Studio 11 will call you before your session.', service_id: null
+};
+const pregnant: Requirement = { ...pacemaker, id: 'r-preg', text: 'Are you pregnant?' };
+const otherService: Requirement = { ...pacemaker, id: 'r-other', service_id: 'single' };
+const studio: GymPage = {
+  ...page, business_id: 'b11', name: 'Studio 11 Fitness', cancellation_hours: 24,
+  staff: [{ ...aaron, specialties: [], specialties_ar: [] }, { ...jackie, specialties: [], specialties_ar: [] }],
+  requirements: [pacemaker, pregnant, otherService],
+  week: { date: '2026-10-08', days: 7, slots: [appt('s-a10', '2026-10-08T10:00:00+03:00', aaron), appt('s-j10', '2026-10-08T10:00:00+03:00', jackie)] }
+};
+
+test('one time chip, then the trainers at that time', () => {
+  assert.deepEqual(timesOn(studio, '2026-10-08').map((x) => x.start), ['2026-10-08T10:00:00+03:00']);
+  assert.deepEqual(classesAt(studio, '2026-10-08T10:00:00+03:00').map((s) => s.trainer), ['Aaron Clarke', 'Jackie Mora']);
+});
+
+test('picking a trainer carries them and the service\'s requirements into the booking', () => {
+  const s = studio.week.slots[1];
+  const { choice, slot: picked } = fromClass(s, studio.cancellation_hours, requirementsFor(studio, s.service_id));
+  assert.equal(picked.trainer?.name, 'Jackie Mora');
+  assert.equal(picked.end, '2026-10-08T07:30:00.000Z');
+  assert.deepEqual(choice.requirements?.map((r) => r.id), ['r-pace', 'r-preg']);
+});
+
+test('a class gym has no requirements step (Aflete unchanged)', () => {
+  const { choice } = fromClass(page.week.slots[1], 4, requirementsFor(page, 'bxs'));
+  assert.equal(choice.requirements, undefined);
+  assert.ok(!('requirements' in bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'en')));
+});
+
+test('continue only when every question is answered; a Yes is flagged, not blocked', () => {
+  const reqs = [pacemaker, pregnant];
+  assert.equal(answered(reqs, {}), false);
+  assert.equal(answered(reqs, { 'r-pace': false }), false);
+  assert.equal(answered(reqs, { 'r-pace': true, 'r-preg': false }), true);
+  assert.deepEqual(flaggedBy(reqs, { 'r-pace': true, 'r-preg': false }).map((r) => r.id), ['r-pace']);
+  const notice: Requirement = { id: 'n', kind: 'notice', text: 'I agree' };
+  assert.equal(answered([notice], { n: false }), false);
+  assert.equal(answered([notice], { n: true }), true);
+});
+
+test('booking args send exactly the answers given, never a default', () => {
+  const { choice } = fromClass(studio.week.slots[0], 24, requirementsFor(studio, 'discovery'));
+  const full = bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'en', { 'r-pace': true, 'r-preg': false });
+  assert.deepEqual(full.requirements, [{ id: 'r-pace', answer: true }, { id: 'r-preg', answer: false }]);
+  /* an unanswered one is left out, so the server refuses rather than assuming "No" */
+  const partial = bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'en', { 'r-pace': false });
+  assert.deepEqual(partial.requirements, [{ id: 'r-pace', answer: false }]);
+});
+
+test('requirements step sits between details and review, and Back returns to it', () => {
+  const { choice, slot: picked } = fromClass(studio.week.slots[0], 24, requirementsFor(studio, 'discovery'));
+  const f = new Flow({ kind: 'cards', result: cards });
+  f.push({ kind: 'details', choice, slot: picked, form: { name: '', phone: '' }, fieldErrors: {} });
+  f.push({ kind: 'requirements', choice, slot: picked, name: 'M', phone: '+97455123456', answers: { 'r-pace': false, 'r-preg': false } });
+  f.push({ kind: 'review', choice, slot: picked, name: 'M', phone: '+97455123456', answers: { 'r-pace': false, 'r-preg': false }, requestId: 'x' });
+  assert.ok(f.back());
+  assert.equal(f.current.kind as string, 'requirements');
+});
+
+test('a refused booking for missing answers is said as such, and is no reason to pick another time', () => {
+  assert.deepEqual(classifyBookingError('Before booking, Studio 11 Fitness needs the user\'s own answer to: "Do you have a pacemaker?" (yes or no).'),
+    { kind: 'requirements', retime: false });
+  assert.deepEqual(classifyBookingError('This business needs every pre-booking requirement answered first.'),
+    { kind: 'requirements', retime: false });
+});
+
+test('the model hears the trainer, never the screening', () => {
+  const note = bookedNote({ ...booking, service_name: 'Discovery Session', business_name: 'Studio 11 Fitness', trainer: 'Aaron Clarke',
+    health_note: 'Studio 11 will call you before your session.' });
+  assert.match(note, /Discovery Session with Aaron Clarke at Studio 11 Fitness/);
+  assert.doesNotMatch(note, /call you|health|screening/i);
 });

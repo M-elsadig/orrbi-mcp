@@ -521,6 +521,79 @@ button.card.tappable:active { transform: scale(0.985); }
   white-space: nowrap;
 }
 
+/* ── Trainers (1:1 appointments) ────────────────────────────────────────── */
+
+.avatar {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--border-radius-full);
+  object-fit: cover;
+  object-position: center top;
+  background: var(--color-background-secondary);
+}
+.avatar.placeholder span { font-size: 18px; }
+.gp-staff { list-style: none; margin: 0; padding: 0; display: grid; }
+.gp-trainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-block-end: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.gp-trainer:last-child { border-block-end: 0; }
+.gp-trainer .avatar { width: 56px; height: 56px; }
+.gp-trainer-text { display: grid; gap: 4px; min-width: 0; }
+.gp-trainer-bio { font-size: 13.5px; line-height: 1.55; color: var(--color-text-secondary); text-wrap: pretty; }
+.gp-skills { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.gp-skills .tag {
+  padding: 2px 8px;
+  border-radius: var(--border-radius-full);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  background: var(--color-background-secondary);
+}
+
+/* ── Requirements (e.g. health screening) ───────────────────────────────── */
+
+.rq-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.rq {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-block-end: var(--border-width-regular) solid var(--color-border-tertiary);
+}
+.rq:last-child { border-block-end: 0; }
+.rq-text { font-size: var(--font-text-sm-size); line-height: 1.45; text-wrap: pretty; }
+.rq-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rq-opt {
+  min-height: 44px;
+  border-radius: var(--border-radius-md);
+  border: var(--border-width-regular) solid var(--color-border-secondary);
+  background: transparent;
+  font: inherit;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.rq-opt.on { background: var(--acc); color: var(--acc-on); border-color: var(--acc); }
+.rq-opt:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
+.rq-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; cursor: pointer; }
+.rq-check input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--acc); }
+/* a flagged answer: calm, it's what happens next, not an error */
+.flag-note {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--border-radius-md);
+  background: var(--color-background-warning);
+  color: var(--color-text-warning);
+  font-size: var(--font-text-sm-size);
+  line-height: 1.45;
+}
+
 .placeholder {
   display: grid;
   place-items: center;

@@ -28,10 +28,14 @@ export type BookingAlert = {
   first_visit_note_ar?: string | null;
   booking_contact?: { name: string | null; phone: string } | null;   // who the owner calls to book
   ladies_only?: boolean;
+  trainer?: string | null;                   // 1:1 appointments
+  /* the requirement questions answered with their flag answer (health
+     screening): the business must call the customer before the session */
+  health_flags?: string[];
 };
 
 type WhatsAppFields = Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'> &
-  Partial<Pick<BookingAlert, 'price_qar' | 'pay_at_venue' | 'category' | 'cancellation_hours' | 'first_visit_note_ar'>>;
+  Partial<Pick<BookingAlert, 'price_qar' | 'pay_at_venue' | 'category' | 'cancellation_hours' | 'first_visit_note_ar' | 'trainer'>>;
 
 /* wa.me wants the number without +, and the text URL-encoded. The prefilled
    message is the one the owner sends once the business has confirmed: the
@@ -41,13 +45,43 @@ export function whatsappLink(b: WhatsAppFields): string {
   const pay = b.price_qar == null ? null : paymentNote({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category }, 'ar');
   const cancel = cancellationText(b.cancellation_hours, 'ar');
   const message = [
-    `مرحبا ${b.customer_name}، حجزك في ${b.business_name} يوم ${qatarLabelAr(b.starts_at)} ` +
+    `مرحبا ${b.customer_name}، حجزك في ${b.business_name}${b.trainer ? ` مع ${b.trainer}` : ''} يوم ${qatarLabelAr(b.starts_at)} ` +
     `تم تأكيده ✅ رقم الحجز: ${b.reference}`,
     ...(pay ? [`💳 ${pay}`] : []),
     ...(cancel ? [`⏰ ${cancel}`] : []),
     ...(b.first_visit_note_ar ? [`📍 ${b.first_visit_note_ar}`] : [])
   ].join('\n');
   return `https://wa.me/${b.customer_phone.replace(/^\+/, '')}?text=${encodeURIComponent(message)}`;
+}
+
+/* The request the owner forwards to the business's booking contact on
+   WhatsApp, in English (what the business works in). Carries the health
+   flag, so the business knows to call the customer before the session.
+   null without a booking contact. */
+export type StudioFields = Pick<BookingAlert,
+  'reference' | 'business_name' | 'service_name' | 'start_label' | 'customer_name' | 'customer_phone' | 'notes'> &
+  Partial<Pick<BookingAlert, 'booking_contact' | 'trainer' | 'health_flags' | 'ladies_only'>>;
+
+export function studioWhatsappLink(b: StudioFields): string | null {
+  const to = b.booking_contact?.phone.replace(/\D/g, '');
+  if (!to) return null;
+  const message = [
+    `Hello${b.booking_contact?.name ? ` ${b.booking_contact.name}` : ''}, a booking request from Orrbi:`,
+    '',
+    `${b.service_name}${b.trainer ? ` with ${b.trainer}` : ''}${b.ladies_only ? ' (ladies only)' : ''}`,
+    `When: ${b.start_label} (Qatar time)`,
+    `Customer: ${b.customer_name}, ${b.customer_phone}`,
+    ...(b.notes ? [`Notes: ${b.notes}`] : []),
+    ...(b.health_flags?.length ? [
+      '',
+      '⚠️ Health screening: the customer answered YES to:',
+      ...b.health_flags.map((q) => `- ${q}`),
+      'Please call the customer before the session to make sure it is safe for them.'
+    ] : []),
+    '',
+    `Ref: ${b.reference}. Can you confirm this time?`
+  ].join('\n');
+  return `https://wa.me/${to}?text=${encodeURIComponent(message)}`;
 }
 
 /* "Book via: Irish (reception) +97477708678" (Telegram makes the number tappable) */
@@ -69,15 +103,23 @@ function cancelLine(b: BookingAlert): string | null {
    caller can log it: a booking whose alert failed must still leave a trace. */
 export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
   const wa = whatsappLink(b);
+  const studio = studioWhatsappLink(b);
 
   /* the full link is long once the Arabic is encoded, so the text carries
      the short form and the button carries the prefilled message */
   const text = [
     '🆕 New booking request (pending)',
+    ...(b.health_flags?.length ? [
+      '',
+      '⚠️ HEALTH FLAG: answered YES to:',
+      ...b.health_flags.map((q) => `- ${q}`),
+      'The business must call the customer before the session (the studio WhatsApp says so).'
+    ] : []),
     '',
     `Ref: ${b.reference}`,
     `Business: ${b.business_name}`,
     `Service: ${b.service_name}${b.ladies_only ? ' (LADIES ONLY)' : ''}`,
+    ...(b.trainer ? [`Trainer: ${b.trainer}`] : []),
     `When: ${b.start_label} (Qatar time)`,
     `Price: ${b.price_qar == null ? 'unknown' : priceText({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category })}`,
     `Customer: ${b.customer_name}`,
@@ -86,13 +128,21 @@ export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
     ...[contactLine(b.booking_contact), cancelLine(b)].filter((l): l is string => Boolean(l)),
     '',
     `WhatsApp: ${wa}`,
+    ...(studio ? [`Studio WhatsApp: ${studio}`] : []),
     '',
     'Source: AI assistant (MCP)',
-    'Book it in the business app, then tap ✅ or ❌.'
+    studio ? 'Book it with the business (📲 sends them the request on WhatsApp), then tap ✅ or ❌.'
+      : 'Book it in the business app, then tap ✅ or ❌.'
   ].join('\n');
 
   const first = await sendTelegram(text, {
-    reply_markup: { inline_keyboard: [[{ text: '💬 Send WhatsApp confirmation', url: wa }], actionRow(b.booking_id)] }
+    reply_markup: {
+      inline_keyboard: [
+        ...(studio ? [[{ text: '📲 Send request to studio', url: studio }]] : []),
+        [{ text: '💬 Send WhatsApp confirmation', url: wa }],
+        actionRow(b.booking_id)
+      ]
+    }
   });
   if (!first || first === NOT_CONFIGURED) return first;
 

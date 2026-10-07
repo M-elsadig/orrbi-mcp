@@ -1,5 +1,5 @@
 import { normalizeQatarPhone } from '../../src/lib/phone.js';
-import type { Choice, DetailsForm } from './flow.js';
+import type { Answers, Choice, DetailsForm } from './flow.js';
 import type { BookingResult, Slot } from './types.js';
 
 /* Booking from inside the card. Pure helpers, no DOM, no host calls. */
@@ -29,7 +29,10 @@ export function newRequestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-export function bookingArgs(choice: Choice, slot: Slot, name: string, phone: string, requestId: string, language: string) {
+export function bookingArgs(
+  choice: Choice, slot: Slot, name: string, phone: string, requestId: string, language: string, answers?: Answers
+) {
+  const reqs = choice.requirements ?? [];
   return {
     business_id: choice.business_id,
     service_id: choice.service_id,
@@ -37,25 +40,31 @@ export function bookingArgs(choice: Choice, slot: Slot, name: string, phone: str
     customer_name: name,
     customer_phone: phone,
     request_id: requestId,
-    language
+    language,
+    /* only answers the customer actually gave: a missing one is never
+       filled in, so the server refuses the booking instead */
+    ...(reqs.length ? {
+      requirements: reqs.filter((r) => typeof answers?.[r.id] === 'boolean').map((r) => ({ id: r.id, answer: answers![r.id] }))
+    } : {})
   };
 }
 
 /* What the model is told after a booking made in the card. Deliberately
-   nothing about the customer: no name, no phone. */
+   nothing about the customer: no name, no phone, no screening answers. */
 export function bookedNote(b: BookingResult): string {
   const when = b.start_label ? `${b.start_label} (Qatar time)` : b.start;
-  return `The user sent a booking request in the Orrbi card: ${b.service_name} at ${b.business_name}, ${when}. ` +
+  return `The user sent a booking request in the Orrbi card: ${b.service_name}${b.trainer ? ` with ${b.trainer}` : ''} at ${b.business_name}, ${when}. ` +
     `Status: ${b.status} (a request, not confirmed until the business confirms). Reference: ${b.reference}. ` +
     'The card already shows it; do not repeat the details, and do not call create_booking for it again.';
 }
 
 /* create_booking's error sentences (src/tools/createBooking.ts) → what the
    card says, and whether the user should go back and pick another time */
-export type BookingErrorKind = 'slotGone' | 'duplicate' | 'tooMany' | 'phone' | 'blocked' | 'other';
+export type BookingErrorKind = 'slotGone' | 'duplicate' | 'tooMany' | 'phone' | 'blocked' | 'requirements' | 'other';
 
 export function classifyBookingError(text: string): { kind: BookingErrorKind; retime: boolean } {
   const t = text.toLowerCase();
+  if (t.includes('requirement') || t.includes("needs the user's own answer")) return { kind: 'requirements', retime: false };
   if (t.includes('fully booked') || t.includes('already passed') || t.includes('does not exist') || t.includes('different business or service') ||
       t.includes('too soon to book')) {
     return { kind: 'slotGone', retime: true };

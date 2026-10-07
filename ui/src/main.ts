@@ -4,10 +4,13 @@ import {
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import './styles.css';
 import { type Lang, dayLabel, langFor, pick, qatarDate, strings, timeLabel } from './i18n';
-import { type Choice, type DetailsForm, Flow, type GymStep, type Step, choiceFromAvailability, classesAt, fromClass, openGym } from './flow';
+import {
+  type Choice, type DetailsForm, Flow, type GymStep, type Step, answered, choiceFromAvailability, classesAt, fromClass, openGym,
+  requirementsFor
+} from './flow';
 import { bookedNote, bookingArgs, classifyBookingError, newRequestId, validateDetails } from './booking';
 import {
-  type TimesMode, viewBooked, viewCards, viewClassPick, viewDetails, viewError, viewGymPage, viewReview, viewSkeleton,
+  type TimesMode, viewBooked, viewCards, viewClassPick, viewDetails, viewError, viewGymPage, viewRequirements, viewReview, viewSkeleton,
   viewTimes, viewTimesError, viewTimesLoading
 } from './render';
 import type { AvailabilityResult, BookingResult, CardsResult, GymCard, GymPage, NextTime, Slot, ToolName } from './types';
@@ -170,9 +173,9 @@ function build(step: Step): HTMLElement {
 
     case 'class':
       return viewClassPick(step.start, step.options, lang, goBack, (s) => {
-        const { choice, slot } = fromClass(s, step.page.cancellation_hours);
+        const { choice, slot } = fromClass(s, step.page.cancellation_hours, requirementsFor(step.page, s.service_id));
         toDetails(choice, slot);
-      });
+      }, step.page.staff);
 
     case 'times': {
       const title = pick(step.choice.service_name, step.choice.service_name_ar, lang);
@@ -191,7 +194,24 @@ function build(step: Step): HTMLElement {
           const { errors, name, phone } = validateDetails(form);
           step.fieldErrors = errors;
           if (errors.name || errors.phone || !phone) return show('none');
-          flow!.push({ kind: 'review', choice: step.choice, slot: step.slot, name, phone, requestId: newRequestId() });
+          /* questions to answer first (e.g. a health screening), else straight to review */
+          flow!.push(step.choice.requirements?.length
+            ? { kind: 'requirements', choice: step.choice, slot: step.slot, name, phone, answers: {} }
+            : { kind: 'review', choice: step.choice, slot: step.slot, name, phone, requestId: newRequestId() });
+          show('fwd');
+        }
+      });
+
+    case 'requirements':
+      return viewRequirements(step, lang, {
+        onBack: goBack,
+        onAnswer: (id, value) => { step.answers[id] = value; show('none'); },
+        onContinue: () => {
+          if (!answered(step.choice.requirements ?? [], step.answers)) return;
+          flow!.push({
+            kind: 'review', choice: step.choice, slot: step.slot, name: step.name, phone: step.phone,
+            answers: { ...step.answers }, requestId: newRequestId()
+          });
           show('fwd');
         }
       });
@@ -286,7 +306,7 @@ async function submit(step: Extract<Step, { kind: 'review' }>) {
     /* name and phone go to the server as tool arguments only: never into
        the chat, never into model context */
     const res = await app.callServerTool(
-      { name: 'create_booking', arguments: bookingArgs(step.choice, step.slot, step.name, step.phone, step.requestId, lang) },
+      { name: 'create_booking', arguments: bookingArgs(step.choice, step.slot, step.name, step.phone, step.requestId, lang, step.answers) },
       { signal: AbortSignal.timeout(CALL_TIMEOUT_MS) }
     );
     if (res.isError) {

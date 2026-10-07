@@ -14,7 +14,39 @@ export type Service = {
   pay_at_venue?: boolean;
 };
 
-export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only?: boolean };
+/* 1:1 appointments: the trainer a slot is with (src/lib/staff.ts) */
+export type Trainer = {
+  id: string;
+  name: string;
+  gender?: 'male' | 'female' | null;
+  title?: string | null;
+  title_ar?: string | null;
+  photo_url?: string | null;
+};
+
+export type TrainerProfile = Trainer & {
+  specialties: string[];
+  specialties_ar: string[];
+  bio?: string | null;
+  bio_ar?: string | null;
+};
+
+/* A question (yes/no) or notice (agree) to answer before booking
+   (src/lib/requirements.ts). flag_answer: the answer the business must know
+   about; it doesn't block, flag_note says what happens next. */
+export type Requirement = {
+  id: string;
+  kind: 'question' | 'notice';
+  text: string;
+  text_ar?: string | null;
+  flag_answer?: boolean;
+  flag_note?: string | null;
+  flag_note_ar?: string | null;
+  /* get_business only: null = every service */
+  service_id?: string | null;
+};
+
+export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only?: boolean; trainer?: Trainer };
 
 export type Day = { date: string; slots: Slot[] };
 
@@ -35,6 +67,7 @@ export type AvailabilityResult = {
   slots: Slot[];
   /* all 7 days from requested_date, preloaded so switching is instant */
   days?: Day[];
+  requirements?: Requirement[];
   note?: string;
 };
 
@@ -54,6 +87,10 @@ export type BookingResult = {
   first_visit?: string;
   first_visit_ar?: string | null;
   cancellation_policy?: string;
+  trainer?: string;
+  /* a flagged requirement answer: what happens next (e.g. the studio calls first) */
+  health_note?: string;
+  health_note_ar?: string | null;
 };
 
 /* find_classes: one open class time, across gyms (src/lib/classes.ts) */
@@ -77,6 +114,9 @@ export type ClassSlot = {
   price_qar?: number;
   pay_at_venue?: boolean;
   duration_min?: number;
+  /* 1:1 appointments */
+  trainer?: string;
+  trainer_info?: Trainer;
 };
 
 export type PartOfDay = 'morning' | 'afternoon' | 'evening' | 'any';
@@ -132,6 +172,9 @@ export type GymPage = {
   first_visit_ar?: string | null;
   services: Service[];
   other_services: { name: string; name_ar?: string | null; price: string }[];
+  /* 1:1 appointments: who can be booked; empty for class-only gyms */
+  staff?: TrainerProfile[];
+  requirements?: Requirement[];
   class_hours: { weekday: number; first: string; last: string }[];
   week: { date: string; days: number; slots: ClassSlot[] };
 };

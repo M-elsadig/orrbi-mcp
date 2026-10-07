@@ -25,7 +25,9 @@ function norm(word: string): string {
 
 add('gym', [
   'gym', 'fitness', 'studio', 'crossfit', 'workout', 'training', 'exercise', 'sport',
-  'جيم', 'فتنس', 'فيتنس', 'رياضة', 'رياضي', 'رياضية', 'تمارين', 'تمرين', 'نادي', 'نوادي', 'صالة'
+  'جيم', 'فتنس', 'فيتنس', 'رياضة', 'رياضي', 'رياضية', 'تمارين', 'تمرين', 'نادي', 'نوادي', 'صالة',
+  /* 1:1 training (Studio 11): "EMS", "personal trainer", "مدرب شخصي" */
+  'ems', 'personal', 'trainer', 'coach', 'pt', 'مدرب', 'مدربه', 'شخصي', 'تدريب'
 ]);
 
 /* Words that can sit next to a category word without changing it:

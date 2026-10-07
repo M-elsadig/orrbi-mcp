@@ -17,7 +17,9 @@
     "test": "tsx --test test/*.test.ts",
     "create-system-user": "tsx --env-file=.env scripts/create-system-user.ts",
     "inspector": "npx @modelcontextprotocol/inspector",
-    "set-telegram-webhook": "tsx --env-file=.env scripts/set-telegram-webhook.ts"
+    "set-telegram-webhook": "tsx --env-file=.env scripts/set-telegram-webhook.ts",
+    "preview:business": "tsx --env-file=.env scripts/preview-business.ts",
+    "preview:build": "npm run build:ui && vite build --config vite.preview.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",

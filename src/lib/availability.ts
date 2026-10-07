@@ -1,16 +1,24 @@
 import { addDays, qatarLabel, todayInQatar, toQatarIso } from './time.js';
+import { type StaffRow, type Trainer, toTrainer, withTrainer } from './staff.js';
 
 /* get_availability reads a whole week in one query and decides here which
    day to show. Pure (no database, `now` passed in) so it can be tested. */
 
 export const WINDOW_DAYS = 7;
 
-export type SlotRow = { id: string; starts_at: string; capacity: number; booked_count: number; ladies_only?: boolean | null };
+export type SlotRow = {
+  id: string; starts_at: string; capacity: number; booked_count: number; ladies_only?: boolean | null;
+  /* 1:1 appointments: the slot's trainer */
+  staff?: StaffRow | null;
+};
 
 /* No spot count: partners also take bookings in their own systems, so
    Orrbi's count isn't the real one, and every booking is a request the
    business confirms. Capacity only decides whether a slot is offered. */
-export type Slot = { slot_id: string; start: string; end: string; start_label: string; ladies_only: boolean };
+export type Slot = {
+  slot_id: string; start: string; end: string; start_label: string; ladies_only: boolean;
+  trainer?: Trainer;
+};
 
 export type Day = { date: string; slots: Slot[] };
 
@@ -28,6 +36,8 @@ export type WeekOptions = {
   /* don't offer slots starting sooner than this (the booking cutoff,
      src/lib/cutoff.ts), so the request can be confirmed */
   minLeadMs?: number;
+  /* only this trainer's slots */
+  staffId?: string;
 };
 
 export const LADIES_SUFFIX = ' · Ladies only';
@@ -45,6 +55,8 @@ export function buildWeek(rows: SlotRow[], requested: string, durationMin: numbe
     if (start.getTime() <= earliest) continue;
     if (Number(r.capacity) - Number(r.booked_count) <= 0) continue;
     if (opts.ladiesOnly !== undefined && ladies !== opts.ladiesOnly) continue;
+    const trainer = toTrainer(r.staff);
+    if (opts.staffId && trainer?.id !== opts.staffId) continue;
 
     const day = byDate.get(todayInQatar(start));   // the slot's Qatar calendar date
     if (!day) continue;
@@ -52,10 +64,11 @@ export function buildWeek(rows: SlotRow[], requested: string, durationMin: numbe
       slot_id: r.id,
       start: toQatarIso(start),
       end: toQatarIso(new Date(start.getTime() + durationMs)),
-      /* the label the model reads out carries "Ladies only", so a
-         ladies-only time can't be offered without saying so */
-      start_label: qatarLabel(start) + (ladies ? LADIES_SUFFIX : ''),
-      ladies_only: ladies
+      /* the label the model reads out carries "Ladies only" and the
+         trainer, so a time can't be offered without saying so */
+      start_label: withTrainer(qatarLabel(start) + (ladies ? LADIES_SUFFIX : ''), trainer),
+      ladies_only: ladies,
+      ...(trainer ? { trainer } : {})
     });
   }
 

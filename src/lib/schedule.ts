@@ -27,3 +27,17 @@ export function weeklyTimes(rows: TemplateRow[], ladiesOnly?: boolean): string |
   }
   return [...days].map(([d, times]) => `${DAYS[d]} ${times.join(', ')}`).join('; ');
 }
+
+/* 1:1 appointments start every 30 minutes, so listing each time would be
+   noise: "Sun 9:00 AM–7:30 PM; …; Fri 9:00 AM–2:30 PM" (first to last
+   start). null when nothing is bookable. */
+export function appointmentHours(rows: TemplateRow[]): string | null {
+  const days = new Map<number, string[]>();
+  for (const r of rows) if (r.bookable) days.set(r.weekday, [...(days.get(r.weekday) ?? []), r.start_time]);
+  if (!days.size) return null;
+  return [...days].sort((a, b) => a[0] - b[0]).map(([d, t]) => {
+    t.sort();
+    const first = clock(t[0]), last = clock(t[t.length - 1]);
+    return `${DAYS[d]} ${first === last ? first : `${first}–${last}`}`;
+  }).join('; ');
+}

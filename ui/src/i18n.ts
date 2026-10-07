@@ -71,7 +71,8 @@ const STRINGS = {
       tooMany: 'This number already has 3 bookings waiting for confirmation.',
       phone: 'Check the mobile number: 8 digits, optionally starting with +974.',
       other: 'Couldn’t complete the booking. Please try again.',
-      blocked: 'This number can’t book through Orrbi right now because of missed bookings. Please contact the Orrbi team and we’ll sort it out.'
+      blocked: 'This number can’t book through Orrbi right now because of missed bookings. Please contact the Orrbi team and we’ll sort it out.',
+      requirements: 'Please answer every question before sending the request.'
     },
     booked: 'Booking requested',
     firstVisit: 'First visit',
@@ -119,7 +120,21 @@ const STRINGS = {
     classSlotMessage: (time: string, day: string, cls: string, business: string) =>
       `I want the ${time} ${cls} class on ${day} at ${business}.`,
     cardTimeMessage: (time: string, day: string, business: string) =>
-      `I want a class at ${business} at ${time} on ${day}.`
+      `I want a class at ${business} at ${time} on ${day}.`,
+    /* 1:1 appointments and pre-booking requirements */
+    trainersTitle: 'Trainers',
+    sessionsTitle: 'Sessions',
+    sessionTimes: 'Session times',
+    chooseTrainer: 'Choose your trainer',
+    trainer: 'Trainer',
+    privateSession: 'Private 1:1',
+    beforeYouBook: 'Before you book',
+    requirementsIntro: 'Please answer each question. Your answers go only to the business.',
+    yes: 'Yes',
+    no: 'No',
+    agree: 'I agree',
+    answerAll: 'Answer every question to continue.',
+    answersGiven: 'Answered'
   },
   ar: {
     placesFound: (n: number) => (n === 1 ? 'مكان واحد' : n === 2 ? 'مكانان' : `${n} أماكن`),
@@ -170,7 +185,8 @@ const STRINGS = {
       tooMany: 'لدى هذا الرقم 3 حجوزات بانتظار التأكيد.',
       phone: 'تحقق من رقم الجوال: 8 أرقام، ويمكن أن يبدأ بـ ‎+974.',
       other: 'تعذّر إتمام الحجز. حاول مرة أخرى.',
-      blocked: 'لا يمكن لهذا الرقم الحجز عبر أوربي حالياً بسبب حجوزات لم يتم حضورها. تواصل مع فريق أوربي وسنساعدك.'
+      blocked: 'لا يمكن لهذا الرقم الحجز عبر أوربي حالياً بسبب حجوزات لم يتم حضورها. تواصل مع فريق أوربي وسنساعدك.',
+      requirements: 'يرجى الإجابة عن كل الأسئلة قبل إرسال الطلب.'
     },
     booked: 'تم طلب الحجز',
     firstVisit: 'زيارتك الأولى',
@@ -216,7 +232,20 @@ const STRINGS = {
     classSlotMessage: (time: string, day: string, cls: string, business: string) =>
       `أريد حصة ${cls} الساعة ${time} يوم ${day} في ${business}.`,
     cardTimeMessage: (time: string, day: string, business: string) =>
-      `أريد حصة في ${business} الساعة ${time} يوم ${day}.`
+      `أريد حصة في ${business} الساعة ${time} يوم ${day}.`,
+    trainersTitle: 'المدربون',
+    sessionsTitle: 'الجلسات',
+    sessionTimes: 'أوقات الجلسات',
+    chooseTrainer: 'اختر مدربك',
+    trainer: 'المدرب',
+    privateSession: 'جلسة خاصة',
+    beforeYouBook: 'قبل الحجز',
+    requirementsIntro: 'يرجى الإجابة عن كل سؤال. تصل إجاباتك إلى المكان فقط.',
+    yes: 'نعم',
+    no: 'لا',
+    agree: 'أوافق',
+    answerAll: 'أجب عن كل الأسئلة للمتابعة.',
+    answersGiven: 'تمت الإجابة'
   }
 } as const;
 

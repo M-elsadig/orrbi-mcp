@@ -122,3 +122,22 @@ test('class hours come from the bookable timetable', () => {
     { weekday: 2, first: '17:15', last: '17:15' }
   ]);
 });
+
+test('each gym keeps its own booking cutoff: Studio 11 2 hours, Aflete 90 minutes', () => {
+  const studio11 = { ...aflete, name_en: 'Studio 11 Fitness', name_ar: null, cancellation_hours: 24, booking_cutoff_min: 120 };
+  const aaron = { id: 'st-aaron', name: 'Aaron Clarke', gender: 'male', title_en: null, title_ar: null, photo_url: null };
+  const appt: ClassRow = {
+    ...row('s1600', '2026-10-06T13:00:00Z'), business_id: 'b11', service_id: 's-discovery',
+    services: svc('Discovery Session', 'Discovery Session'), businesses: studio11, staff: aaron
+  };
+  const rows = [row('l1600', '2026-10-06T13:00:00Z', lower, true), appt];
+  /* Tue 2:15 PM Qatar: both 4:00 PM times are 105 minutes away */
+  const now = Date.parse('2026-10-06T11:15:00Z');
+  assert.deepEqual(pickSlots(rows, {}, now).map((s) => s.slot_id), ['l1600']);
+  /* at 1:45 PM (135 min away) both are offered, the appointment naming its trainer */
+  const both = pickSlots(rows, {}, Date.parse('2026-10-06T10:45:00Z'));
+  assert.deepEqual(both.map((s) => s.slot_id), ['l1600', 's1600']);
+  assert.equal(both[1].start_label, 'Tue 6 Oct, 4:00 PM · with Aaron Clarke');
+  assert.equal(forModel(both[1]).trainer, 'Aaron Clarke');
+  assert.ok(!('trainer' in forModel(both[0])));
+});
