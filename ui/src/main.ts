@@ -122,29 +122,69 @@ async function requestMode(mode: 'inline' | 'fullscreen') {
 
 /* ── Rendering the current step ─────────────────────────────────────────── */
 
-type Dir = 'fwd' | 'back' | 'none';
+/* fwd/back: a step slides in from the trailing/leading edge (mirrored in
+   Arabic by CSS). sheet: the gym page rises like an iOS sheet. */
+type Dir = 'fwd' | 'back' | 'sheet' | 'none';
 
-/* Forward slides in from the trailing edge, Back from the leading edge:
-   the same path both ways (mirrored in Arabic by CSS). */
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* While a step is animating in, a redraw of it (e.g. the gym page's data
+   arriving mid-rise) waits until it has landed: rebuilding the page during
+   the animation both stutters and cuts the animation short. */
+let animating = false;
+let redrawAfter = false;
+
 function mount(el: HTMLElement, dir: Dir) {
   const step = document.createElement('div');
   step.className = dir === 'none' ? 'step' : `step enter-${dir}`;
+  /* the enter class carries will-change; it goes once the step has landed */
+  if (dir !== 'none') {
+    animating = true;
+    const landed = () => {
+      if (!animating || root.firstElementChild !== step) return;
+      animating = false;
+      step.className = 'step';
+      if (redrawAfter) { redrawAfter = false; show('none'); }
+    };
+    step.addEventListener('animationend', (e) => { if (e.target === el) landed(); });
+    setTimeout(landed, 450);   // never wait on an animation that didn't run
+  } else {
+    animating = false;
+  }
   step.append(el);
   root.replaceChildren(step);
   /* a new step starts at its top; a redraw of the same one keeps its place */
   if (dir !== 'none' && displayMode === 'fullscreen') window.scrollTo(0, 0);
 }
 
+/* Closing the gym page: the sheet sinks and fades (the reverse of opening),
+   then the carousel is back. Instant with reduced motion. */
+function closeSheet(then: () => void) {
+  const cur = root.firstElementChild as HTMLElement | null;
+  if (!cur || reducedMotion()) return then();
+  cur.className = 'step exit-sheet';
+  let done = false;
+  const finish = () => { if (!done) { done = true; then(); } };
+  cur.addEventListener('animationend', (e) => { if (e.target === cur.firstElementChild) finish(); });
+  setTimeout(finish, 320);   // never wait on an animation that didn't run
+}
+
 function show(dir: Dir) {
+  if (dir === 'none' && animating) { redrawAfter = true; return; }
+  redrawAfter = false;
   if (errorText !== null) return mount(viewError(errorText, lang), dir);
   if (!flow) return mount(viewSkeleton(tool), dir);
   mount(build(flow.current), dir);
 }
 
 const goBack = () => {
+  const from = flow?.current.kind;
   if (!flow?.back()) return;
-  /* back on the carousel: the gym page is closed, so is fullscreen */
-  if (flow.current.kind === 'cards') void requestMode('inline');
+  /* back on the carousel: the gym page closes like a sheet, then fullscreen does */
+  if (flow.current.kind === 'cards') {
+    if (from === 'gym') return closeSheet(() => { show('none'); void requestMode('inline'); });
+    void requestMode('inline');
+  }
   show('back');
 };
 const backFor = () => (flow?.canGoBack ? goBack : undefined);
@@ -250,7 +290,9 @@ function toDetails(choice: Choice, slot: Slot) {
 async function openGymPage(g: GymCard, start?: string) {
   const step = openGym(g, start);
   flow!.push(step);
-  show('fwd');
+  /* the page rises like a sheet at once (card data + skeletons), and
+     fills in when get_business answers */
+  show('sheet');
   void requestMode('fullscreen');
   await loadPage(step);
 }
@@ -467,6 +509,10 @@ app.ontoolresult = (result) => start(result as CallToolResult);
 app.ontoolcancelled = () => { if (!received) root.replaceChildren(); };
 app.onteardown = async () => ({});
 app.onerror = (e) => console.error('[orrbi]', e);
+
+/* iOS WebKit only applies :active (the pressed state every tappable shows)
+   when the page listens for touches; an empty passive listener turns it on */
+document.addEventListener('touchstart', () => undefined, { passive: true });
 
 show('none');
 applyLocale(undefined);

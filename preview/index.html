@@ -52,7 +52,7 @@
       border: 0.5px solid var(--line); background: var(--panel); position: relative;
       transition: height 200ms ease;
     }
-    #stage[data-mode="fullscreen"] { height: min(844px, calc(100dvh - 140px)); }
+    #stage[data-mode="fullscreen"] { height: var(--stage-h, min(844px, calc(100dvh - 140px))); }
     #close { display: none; position: absolute; top: 8px; inset-inline-end: 8px; z-index: 2; min-height: 30px; }
     #stage[data-mode="fullscreen"] #close { display: block; }
     iframe { width: 100%; height: 100%; border: 0; display: block; background: transparent; }

@@ -47,6 +47,9 @@ export type GymStep = {
   day?: string;
   time?: string;
   hoursOpen?: boolean;
+  /* the photo strip, built once and reused on redraws (render.ts) */
+  hero?: HTMLElement;
+  heroKey?: string;
 };
 
 export type Step =

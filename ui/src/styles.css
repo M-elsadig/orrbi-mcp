@@ -44,9 +44,25 @@
   /* room under the last button in fullscreen; main.ts sets it from the
      host context (layout.ts). Phones: Claude's chat input covers ~120px. */
   --bottom-clear: 24px;
+
+  /* Motion: a damped spring (ζ 0.82: fast start, ~1% soft settle), sampled
+     into linear(); hosts without linear() get a close cubic. Durations
+     200–350ms. Only transform and opacity are ever animated. */
+  --spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --t-step: 300ms;
+  --t-sheet: 340ms;
+  --t-exit: 220ms;
+  --t-press: 90ms;
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring: linear(0, 0.087, 0.267, 0.463, 0.635, 0.77, 0.868, 0.933, 0.973, 0.996, 1.007, 1.011, 1.011, 1.009,
+      1.007, 1.005, 1.003, 1.002, 1.001, 1.001, 1);
+  }
 }
 @media (pointer: coarse) {
-  :root { --bottom-clear: 140px; }
+  :root { --bottom-clear: 220px; }
 }
 
 * { box-sizing: border-box; }
@@ -116,7 +132,7 @@ h3, p, ul, dl, dd { margin: 0; }
   color: var(--color-text-primary);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background-color 120ms ease, transform 100ms ease-out;
+  transition: transform var(--t-press) var(--spring);
 }
 .back::after { content: ""; position: absolute; inset: -4px; }   /* 44px to hit */
 .back:active { transform: scale(0.94); background: var(--color-background-secondary); }
@@ -143,11 +159,18 @@ h3, p, ul, dl, dd { margin: 0; }
   color: var(--color-text-tertiary);
 }
 
-/* forward comes in from the trailing edge, back from the leading edge */
-.step.enter-fwd > * { animation: step-fwd 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-.step.enter-back > * { animation: step-back 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* forward comes in from the trailing edge, back from the leading edge; the
+   gym page rises like an iOS sheet and sinks back when closed. will-change
+   only while the class is on (main.ts drops it on animationend). */
+.step.enter-fwd > *, .step.enter-back > *, .step.enter-sheet > *, .step.exit-sheet > * { will-change: transform, opacity; }
+.step.enter-fwd > * { animation: step-fwd var(--t-step) var(--spring) both; }
+.step.enter-back > * { animation: step-back var(--t-step) var(--spring) both; }
+.step.enter-sheet > * { animation: sheet-up var(--t-sheet) var(--spring) both; }
+.step.exit-sheet > * { animation: sheet-down var(--t-exit) var(--ease-in) both; pointer-events: none; }
 @keyframes step-fwd { from { opacity: 0; transform: translateX(calc(var(--dir) * 18px)); } }
 @keyframes step-back { from { opacity: 0; transform: translateX(calc(var(--dir) * -18px)); } }
+@keyframes sheet-up { from { opacity: 0; transform: translateY(56px); } }
+@keyframes sheet-down { to { opacity: 0; transform: translateY(56px); } }
 
 /* rows and cards that open the next step */
 button.tappable {
@@ -160,7 +183,7 @@ button.tappable {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: background-color 120ms ease, transform 100ms ease-out;
+  transition: transform var(--t-press) var(--spring);
 }
 button.tappable:active { background: var(--color-background-secondary); }
 button.tappable:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: -2px; }
@@ -191,12 +214,17 @@ button.card.tappable:active { transform: scale(0.985); }
 
 /* ── Cards: one compact card per gym, swiping sideways ──────────────────── */
 
-.cards { display: grid; gap: 8px; }
+/* one column no wider than the card, so a long caption wraps instead of
+   pushing past the edge (it was cut off on the right in Arabic) */
+.cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .cards-caption {
+  min-width: 0;
   font-size: var(--font-text-xs-size);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
   padding-inline: 2px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .carousel {
@@ -221,11 +249,27 @@ button.card.tappable:active { transform: scale(0.985); }
   display: block;
   width: 100%;
   aspect-ratio: 16 / 10;
-  object-fit: cover;
+}
+.gc-photo.sk { border-radius: 0; height: auto; }
+
+/* A photo box (render.ts photo()): holds its size, pulses as a skeleton
+   while the image loads, then the image fades in. A missing or broken photo
+   leaves the plain surface: no blank hole, no letter. */
+.ph {
+  position: relative;
+  overflow: hidden;
   background: var(--color-background-secondary);
 }
-.gc-photo.placeholder span { font-size: 40px; }
-.gc-photo.sk { border-radius: 0; height: auto; }
+.ph > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity 260ms ease;
+}
+.ph.loading { animation: sk-pulse 1.4s ease-in-out infinite; }
+.ph.loading > img { opacity: 0; }
+.ph.empty { background: linear-gradient(135deg, var(--color-background-secondary), var(--color-background-tertiary)); }
 .gc-body { display: grid; gap: 2px; padding: 10px 12px 0; min-width: 0; }
 .gc-name {
   font-weight: var(--font-weight-semibold);
@@ -268,7 +312,7 @@ button.card.tappable:active { transform: scale(0.985); }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: transform 100ms ease-out, background-color 120ms ease, border-color 120ms ease;
+  transition: transform var(--t-press) var(--spring);
 }
 .gc-time::after { content: ""; position: absolute; inset: -5px -2px; }   /* 44px to hit */
 .gc-time .mark { font-size: 11px; color: light-dark(#8a2f68, #f0a6d3); }
@@ -302,11 +346,10 @@ button.card.tappable:active { transform: scale(0.985); }
   width: 100%;
   aspect-ratio: 16 / 10;
   max-height: 352px;          /* the app's hero height */
-  object-fit: cover;
   scroll-snap-align: start;
+  scroll-snap-stop: always;   /* one photo per swipe, like Photos */
   display: block;
 }
-.gp-shot.placeholder { display: grid; }
 .gp-dots {
   position: absolute;
   inset-inline: 0;
@@ -316,14 +359,16 @@ button.card.tappable:active { transform: scale(0.985); }
   gap: 6px;
   pointer-events: none;
 }
+/* the current photo's dot grows and brightens: transform and opacity only */
 .gp-dots span {
   width: 6px;
   height: 6px;
   border-radius: var(--tnd-pill);
-  background: rgb(255 255 255 / 0.55);
-  transition: width 220ms ease, background-color 220ms ease;
+  background: #fff;
+  opacity: 0.55;
+  transition: transform 220ms var(--spring), opacity 220ms ease;
 }
-.gp-dots span.on { width: 16px; background: #fff; }
+.gp-dots span.on { opacity: 1; transform: scale(1.35); }
 /* a round glass back button over the photo, as in the app */
 .gp-back {
   position: absolute;
@@ -389,7 +434,7 @@ button.card.tappable:active { transform: scale(0.985); }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: transform 90ms ease-out, background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition: transform var(--t-press) var(--spring);
 }
 .gp-slot.ladies { border-radius: 14px; }
 .gp-slot-tag { font-size: 10px; font-weight: var(--font-weight-normal); color: light-dark(#8a2f68, #f0a6d3); }
@@ -445,7 +490,7 @@ button.card.tappable:active { transform: scale(0.985); }
   border-inline-end: 1.5px solid var(--color-text-secondary);
   border-block-end: 1.5px solid var(--color-text-secondary);
   transform: translateY(-2px) rotate(45deg);
-  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: transform 260ms var(--spring);
 }
 .disclose.open { transform: translateY(1px) rotate(225deg); }
 
@@ -464,9 +509,18 @@ button.card.tappable:active { transform: scale(0.985); }
 :root[data-mode="fullscreen"] #root {
   padding: var(--safe-top) var(--safe-right) var(--bottom-clear) var(--safe-left);
 }
-:root[data-mode="fullscreen"] .gp { border: 0; border-radius: 0; min-height: 100dvh; display: flex; flex-direction: column; }
+/* the gym page as a Google Maps place sheet: a small gap at the top and
+   large rounded top corners, the cover photo clipped to them */
+:root[data-mode="fullscreen"] .gp {
+  border: 0;
+  margin: 8px 6px 0;
+  border-radius: 28px 28px 0 0;
+  min-height: calc(100dvh - 8px);
+  display: flex;
+  flex-direction: column;
+}
 :root[data-mode="fullscreen"] .gp-body { flex: 1; }
-:root[data-mode="fullscreen"] .gp-back { top: calc(10px + var(--safe-top)); }
+:root[data-mode="fullscreen"] .gp-back { top: 12px; inset-inline-start: 12px; }
 :root[data-mode="fullscreen"] .step > .card { border-radius: 0; border-inline: 0; }
 @media (min-width: 720px) {
   :root[data-mode="fullscreen"] .step { max-width: 640px; margin-inline: auto; }
@@ -531,11 +585,8 @@ button.card.tappable:active { transform: scale(0.985); }
   width: 48px;
   height: 48px;
   border-radius: var(--border-radius-full);
-  object-fit: cover;
-  object-position: center top;
-  background: var(--color-background-secondary);
 }
-.avatar.placeholder span { font-size: 18px; }
+.avatar > img { object-position: center top; }
 .gp-staff { list-style: none; margin: 0; padding: 0; display: grid; }
 .gp-trainer {
   display: flex;
@@ -638,7 +689,7 @@ button.card.tappable:active { transform: scale(0.985); }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: transform 100ms ease-out, background-color 120ms ease;
+  transition: transform var(--t-press) var(--spring);
 }
 .day-top {
   font-size: 11px;
@@ -699,7 +750,7 @@ button.card.tappable:active { transform: scale(0.985); }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: transform 100ms ease-out, background-color 120ms ease, border-color 120ms ease;
+  transition: transform var(--t-press) var(--spring);
 }
 /* compact to look at, 44px to hit: the tap area reaches past the chip */
 .time::after { content: ""; position: absolute; inset: -4px -3px; }
@@ -733,7 +784,7 @@ button.card.tappable:active { transform: scale(0.985); }
   background: var(--color-background-secondary);
   border: var(--border-width-regular) solid var(--color-border-tertiary);
   border-radius: var(--border-radius-md);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  /* focus ring appears at once: no box-shadow animation */
 }
 .input::placeholder { color: var(--color-text-tertiary); }
 .input:focus { outline: none; border-color: var(--color-border-primary); box-shadow: 0 0 0 3px var(--color-ring-primary, rgb(0 0 0 / 0.2)); }
@@ -759,7 +810,7 @@ button.card.tappable:active { transform: scale(0.985); }
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  transition: transform 100ms ease-out, opacity 120ms ease;
+  transition: transform var(--t-press) var(--spring), opacity 120ms ease;
 }
 .btn.primary { background: var(--color-background-inverse); color: var(--color-text-inverse); border: 0; }
 .btn.accent { background: var(--acc); color: var(--acc-on); border: 0; }
@@ -826,11 +877,14 @@ button.card.tappable:active { transform: scale(0.985); }
 @keyframes sk-pulse { 50% { opacity: 0.5; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .sk, .times.swap, .gp-hours { animation: none; }
-  .gp-dots span, .gc-time, .gp-slot { transition: none; }
+  .sk, .ph.loading, .times.swap, .gp-hours { animation: none; }
+  .gp-dots span, .gc-time, .gp-slot, .ph > img { transition: none; }
   .gc-time:active:not(:disabled), .gp-slot:active { transform: none; }
+  .gp-dots span.on { transform: none; }
   .disclose { transition: none; }
-  .step.enter-fwd > *, .step.enter-back > * { animation: fade-in 150ms ease; }
+  /* no sliding, no rising: a short fade, and closing is instant (main.ts) */
+  .step.enter-fwd > *, .step.enter-back > *, .step.enter-sheet > * { animation: fade-in 150ms ease; }
+  .step.exit-sheet > * { animation: none; }
   button.tappable, .btn, .back { transition: none; }
   button.card.tappable:active, .btn:active:not(:disabled), .back:active { transform: none; }
   .day, .time { transition: none; }

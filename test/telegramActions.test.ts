@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { actionRow, keyboardAfter, noShowRow, parseAction, textAfter, webhookSecret } from '../src/lib/telegramActions.js';
+import { STUDIO_BUTTON, actionRow, keyboardAfter, noShowRow, parseAction, textAfter, webhookSecret } from '../src/lib/telegramActions.js';
 
 const ID = '3f2c1a9e-8b7d-4c6e-9f00-112233445566';
 const WA = 'https://wa.me/97455000000?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7';
@@ -59,4 +59,14 @@ test('the webhook secret is stable, Telegram-safe and not the token', () => {
   assert.equal(s, webhookSecret('123:abc'));
   assert.notEqual(s, webhookSecret('123:abd'));
   assert.match(s, /^[0-9a-f]{48}$/);
+});
+
+test('confirmed: the customer confirmation is never swapped for the studio request', () => {
+  const STUDIO = 'https://wa.me/97477700000?text=Hello%20Irish';
+  const withStudio = { inline_keyboard: [[{ text: STUDIO_BUTTON, url: STUDIO }], [{ text: '💬 Send WhatsApp confirmation', url: WA }], actionRow(ID)] };
+  assert.deepEqual(keyboardAfter(withStudio, 'confirmed', ID), {
+    inline_keyboard: [[{ text: '💬 Send WhatsApp confirmation', url: WA }], noShowRow(ID)]
+  });
+  assert.deepEqual(keyboardAfter(withStudio, 'failed', ID),
+    { inline_keyboard: [[{ text: '💬 WhatsApp the customer', url: 'https://wa.me/97455000000' }]] });
 });

@@ -34,8 +34,10 @@ const params = new URLSearchParams(location.search);
    that the host does not report as a safe-area inset). ?nophotos=1 drops
    the photos (the automation browser stalls on large inline images). */
 const width = Number(params.get('w')) || 0;
+const height = Number(params.get('h')) || 0;
 const overlay = Number(params.get('overlay')) || 0;
 if (width) document.documentElement.style.setProperty('--stage-w', `${width}px`);
+if (height) document.documentElement.style.setProperty('--stage-h', `${height}px`);
 if (overlay) {
   document.documentElement.style.setProperty('--overlay-h', `${overlay}px`);
   document.getElementById('overlay')!.hidden = false;
@@ -136,7 +138,8 @@ async function start() {
   b.onmessage = async () => ({});
   b.oninitialized = () => {
     b.sendToolInput({ arguments: { query: data.page.name, language: lang } });
-    b.sendToolResult({ content: [{ type: 'text', text: '{}' }], structuredContent: data.cards });
+    const cards = params.has('next') ? { ...data.cards, next: true } : data.cards;
+    b.sendToolResult({ content: [{ type: 'text', text: '{}' }], structuredContent: cards });
   };
 
   /* listen first: the widget says hello as soon as it loads */

@@ -12,6 +12,7 @@ import { cancellationText, paymentNote, priceText } from '../lib/payment.js';
 import { cutoffMs, cutoffText } from '../lib/cutoff.js';
 import { type Requirement, checkAnswers, flagNotes, forService, loadRequirements } from '../lib/requirements.js';
 import { type StaffRow, toTrainer } from '../lib/staff.js';
+import { type Place, mapsLink } from '../lib/maps.js';
 import { WIDGET_URI } from '../widget.js';
 import { languageInput } from '../lib/language.js';
 
@@ -107,7 +108,9 @@ export function registerCreateBooking(server: McpServer) {
           answer: z.boolean()
         })).max(50).optional()
           .describe('The user\'s own answers to the business\'s requirements: question → true (yes) / false (no); notice → true once they agree. Required when the business has requirements.'),
-        language: languageInput
+        language: languageInput.describe(
+          'The language the user is writing in: "ar" for Arabic, "en" for English. Always pass it: it is stored with the booking, ' +
+          'and the customer\'s WhatsApp messages are sent in it.')
       },
       outputSchema: {
         booking_id: z.string(),
@@ -153,6 +156,10 @@ export function registerCreateBooking(server: McpServer) {
 
       const owner = process.env.ORRBI_MCP_USER_ID;
       if (!owner) return unexpected('create_booking.config', new Error('ORRBI_MCP_USER_ID is not set'));
+
+      /* the language the customer booked in, kept with the booking for every
+         message to them; the card and the model pass it */
+      const language = bookingLanguage(args.language, args.customer_name);
 
       /* what the checks, the confirmation and the alert need. Best effort:
          if it fails the booking still goes ahead, with plainer wording */
@@ -213,15 +220,26 @@ export function registerCreateBooking(server: McpServer) {
         p_customer_phone: phone,
         p_notes: args.notes || null,
         p_request_id: args.request_id || null,
-        p_requirements: reqs.length ? args.requirements ?? [] : null
+        p_requirements: reqs.length ? args.requirements ?? [] : null,
+        p_language: language
       };
 
-      let res = await db().rpc('create_guest_booking', params);
+      /* p_language arrives with migration 0011. Until it is applied the
+         database has no such argument (PostgREST PGRST202): book without
+         it; the alert and the WhatsApp text still use the language. */
+      const book = async () => {
+        const r = await db().rpc('create_guest_booking', params);
+        if (r.error?.code !== 'PGRST202') return r;
+        const { p_language: _unstored, ...without } = params;
+        return db().rpc('create_guest_booking', without);
+      };
+
+      let res = await book();
 
       /* two calls racing on the same request_id: the loser hits the unique
          index and rolls back. Asking again returns the winner's booking. */
       if (res.error?.code === '23505' && params.p_request_id) {
-        res = await db().rpc('create_guest_booking', params);
+        res = await book();
       }
 
       if (res.error) {
@@ -266,7 +284,8 @@ export function registerCreateBooking(server: McpServer) {
             notes: args.notes || null,
             trainer,
             /* whether, never what: the answers stay in booking_contacts */
-            health_flag: flagged.length > 0
+            health_flag: flagged.length > 0,
+            language
           }),
           notifyTelegram({
             booking_id: row.booking_id,
@@ -284,6 +303,11 @@ export function registerCreateBooking(server: McpServer) {
             cancellation_hours: ctx.cancellation_hours,
             venue_cancellation_hours: ctx.venue_cancellation_hours,
             first_visit_note_ar: ctx.first_visit_note_ar,
+            first_visit_note_en: ctx.first_visit_note_en,
+            language,
+            business_name_ar: ctx.business_name_ar,
+            service_name_ar: ctx.service_name_ar,
+            maps_link: ctx.business_name ? mapsLink({ ...ctx.place, name: ctx.business_name }) : null,
             booking_contact: ctx.booking_contact,
             ladies_only: ctx.slot_ladies_only,
             trainer,
@@ -350,6 +374,13 @@ function safeArgs<T extends { requirements?: unknown }>(args: T): Omit<T, 'requi
   return { ...args, requirements: withoutAnswers(args.requirements) };
 }
 
+/* The customer's language: what the card or the model passed, else a guess
+   from the name they gave (Arabic letters → Arabic), else English. */
+export function bookingLanguage(given: 'ar' | 'en' | undefined, customerName: string): 'ar' | 'en' {
+  if (given) return given;
+  return /[؀-ۿ]/.test(customerName) ? 'ar' : 'en';
+}
+
 /* Best effort: a failed lookup must not stop a booking. */
 async function noShowCount(phone: string): Promise<number> {
   try {
@@ -381,6 +412,8 @@ type BookingContext = {
   slot_ladies_only: boolean;
   booking_cutoff_min: number | null;
   trainer: { id: string; name: string } | null;
+  /* for the Maps link in the customer's confirmation */
+  place: Omit<Place, 'name'>;
 };
 
 /* Everything about the business and service the booking needs beyond what
@@ -392,7 +425,7 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
     const signal = AbortSignal.timeout(2000);
     const [b, s, p, a] = await Promise.all([
       db().from('businesses')
-        .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,booking_cutoff_min,first_visit_note_en,first_visit_note_ar')
+        .select('name_en,name_ar,category,pay_at_venue,cancellation_hours,venue_cancellation_hours,booking_cutoff_min,first_visit_note_en,first_visit_note_ar,address,maps_url,lat,lng')
         .eq('id', businessId).abortSignal(signal).maybeSingle(),
       db().from('services').select('name_en,name_ar,price,bookable').eq('id', serviceId).abortSignal(signal).maybeSingle(),
       db().from('business_private').select('booking_contact_name,booking_contact_phone')
@@ -422,6 +455,7 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
       slot_starts_at: slot?.starts_at ?? null,
       slot_ladies_only: Boolean(slot?.ladies_only),
       booking_cutoff_min: b.data?.booking_cutoff_min ?? null,
+      place: { address: b.data?.address ?? null, maps_url: b.data?.maps_url ?? null, lat: b.data?.lat ?? null, lng: b.data?.lng ?? null },
       trainer: trainer ? { id: trainer.id, name: trainer.name } : null
     };
   } catch {
@@ -429,7 +463,7 @@ async function bookingContext(businessId: string, serviceId: string, slotId: str
       bookable: null, business_name: null, business_name_ar: null, service_name: null, service_name_ar: null,
       category: null, price: null, pay_at_venue: false, cancellation_hours: null, venue_cancellation_hours: null,
       first_visit_note_en: null, first_visit_note_ar: null, booking_contact: null,
-      slot_starts_at: null, slot_ladies_only: false, booking_cutoff_min: null, trainer: null
+      slot_starts_at: null, slot_ladies_only: false, booking_cutoff_min: null, trainer: null, place: {}
     };
   }
 }

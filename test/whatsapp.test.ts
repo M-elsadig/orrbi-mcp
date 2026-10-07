@@ -21,14 +21,16 @@ test('links to the customer number without +', () => {
 });
 
 test('prefills the Arabic confirmation in Qatar time', () => {
-  const text = new URL(whatsappLink(alert)).searchParams.get('text');
+  const text = new URL(whatsappLink({ ...alert, language: 'ar' })).searchParams.get('text');
   assert.equal(text,
-    'مرحبا Mohamed Test، حجزك في Test Gym يوم الاثنين، 5 أكتوبر في 6:00 م تم تأكيده ✅ رقم الحجز: ATO-KX4CTS');
+    'مرحبا Mohamed Test، تم تأكيد حجزك في Test Gym ✅\nCrossFit class · الاثنين، 5 أكتوبر في 6:00 م\nرقم الحجز: ATO-KX4CTS');
 });
 
 test('the customer confirmation names the trainer of a 1:1 session', () => {
-  const text = new URL(whatsappLink({ ...alert, trainer: 'Jackie Mora' })).searchParams.get('text');
-  assert.match(text ?? '', /^مرحبا Mohamed Test، حجزك في Test Gym مع Jackie Mora يوم /);
+  const ar = new URL(whatsappLink({ ...alert, language: 'ar', trainer: 'Jackie Mora' })).searchParams.get('text');
+  assert.match(ar ?? '', /\nCrossFit class مع Jackie Mora · /);
+  const en = new URL(whatsappLink({ ...alert, language: 'en', trainer: 'Jackie Mora' })).searchParams.get('text');
+  assert.match(en ?? '', /\nCrossFit class with Jackie Mora · Mon 5 Oct, 6:00 PM\nRef: ATO-KX4CTS$/);
 });
 
 const studio = {

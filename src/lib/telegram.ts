@@ -1,6 +1,6 @@
-import { qatarLabelAr } from './time.js';
-import { actionRow } from './telegramActions.js';
-import { cancellationText, paymentNote, priceText } from './payment.js';
+import { qatarLabel, qatarLabelAr } from './time.js';
+import { STUDIO_BUTTON, actionRow } from './telegramActions.js';
+import { type Lang, cancellationText, payOnArrival, priceText } from './payment.js';
 
 /* Ping the owner on Telegram when an MCP booking comes in. Best effort, like
    the n8n webhook: a Telegram failure is logged and never fails the booking.
@@ -26,6 +26,12 @@ export type BookingAlert = {
   cancellation_hours?: number | null;        // what the customer is told
   venue_cancellation_hours?: number | null;  // what the business needs
   first_visit_note_ar?: string | null;
+  first_visit_note_en?: string | null;
+  /* the customer's language (booking_contacts.language): every message to them uses it */
+  language?: Lang | null;
+  business_name_ar?: string | null;
+  service_name_ar?: string | null;
+  maps_link?: string | null;
   booking_contact?: { name: string | null; phone: string } | null;   // who the owner calls to book
   ladies_only?: boolean;
   trainer?: string | null;                   // 1:1 appointments
@@ -34,24 +40,40 @@ export type BookingAlert = {
   health_flags?: string[];
 };
 
-type WhatsAppFields = Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'> &
-  Partial<Pick<BookingAlert, 'price_qar' | 'pay_at_venue' | 'category' | 'cancellation_hours' | 'first_visit_note_ar' | 'trainer'>>;
+export type WhatsAppFields = Pick<BookingAlert, 'customer_name' | 'customer_phone' | 'business_name' | 'starts_at' | 'reference'> &
+  Partial<Pick<BookingAlert, 'price_qar' | 'pay_at_venue' | 'category' | 'cancellation_hours' | 'first_visit_note_ar' |
+    'first_visit_note_en' | 'trainer' | 'language' | 'business_name_ar' | 'service_name' | 'service_name_ar' | 'maps_link'>>;
 
-/* wa.me wants the number without +, and the text URL-encoded. The prefilled
-   message is the one the owner sends once the business has confirmed: the
-   confirmation, then where to pay, the cancellation window and the
-   first-visit note, each only when known. */
-export function whatsappLink(b: WhatsAppFields): string {
-  const pay = b.price_qar == null ? null : paymentNote({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category }, 'ar');
-  const cancel = cancellationText(b.cancellation_hours, 'ar');
-  const message = [
-    `مرحبا ${b.customer_name}، حجزك في ${b.business_name}${b.trainer ? ` مع ${b.trainer}` : ''} يوم ${qatarLabelAr(b.starts_at)} ` +
-    `تم تأكيده ✅ رقم الحجز: ${b.reference}`,
+/* The confirmation the owner sends the customer once the business has
+   confirmed, in the customer's language (the one they booked in; old
+   bookings without one stay Arabic, as before): the booking, where to pay
+   (by the business's name), the cancellation window, the first-visit note
+   and a Maps link, each only when known. wa.me wants the number without +,
+   and the text URL-encoded. */
+export function whatsappMessage(b: WhatsAppFields): string {
+  const ar = (b.language ?? 'ar') === 'ar';
+  const lang: Lang = ar ? 'ar' : 'en';
+  const business = (ar && b.business_name_ar) || b.business_name;
+  const service = (ar && b.service_name_ar) || b.service_name;
+  const when = ar ? qatarLabelAr(b.starts_at) : qatarLabel(b.starts_at);
+  const what = service ? `${service}${b.trainer ? (ar ? ` مع ${b.trainer}` : ` with ${b.trainer}`) : ''} · ${when}` : when;
+  const pay = b.price_qar == null ? null : payOnArrival({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category }, business, lang);
+  const cancel = cancellationText(b.cancellation_hours, lang);
+  const note = ar ? b.first_visit_note_ar : b.first_visit_note_en;
+  return [
+    ar ? `مرحبا ${b.customer_name}، تم تأكيد حجزك في ${business} ✅` : `Hi ${b.customer_name}, your booking at ${business} is confirmed ✅`,
+    what,
+    ar ? `رقم الحجز: ${b.reference}` : `Ref: ${b.reference}`,
+    '',
     ...(pay ? [`💳 ${pay}`] : []),
     ...(cancel ? [`⏰ ${cancel}`] : []),
-    ...(b.first_visit_note_ar ? [`📍 ${b.first_visit_note_ar}`] : [])
-  ].join('\n');
-  return `https://wa.me/${b.customer_phone.replace(/^\+/, '')}?text=${encodeURIComponent(message)}`;
+    ...(note ? [`ℹ️ ${note}`] : []),
+    ...(b.maps_link ? [`📍 ${b.maps_link}`] : [])
+  ].join('\n').trimEnd();
+}
+
+export function whatsappLink(b: WhatsAppFields): string {
+  return `https://wa.me/${b.customer_phone.replace(/^\+/, '')}?text=${encodeURIComponent(whatsappMessage(b))}`;
 }
 
 /* The request the owner forwards to the business's booking contact on
@@ -124,6 +146,7 @@ export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
     `Price: ${b.price_qar == null ? 'unknown' : priceText({ price_qar: b.price_qar, pay_at_venue: b.pay_at_venue, category: b.category })}`,
     `Customer: ${b.customer_name}`,
     `Phone: ${b.customer_phone}`,
+    `Language: ${(b.language ?? 'ar') === 'ar' ? 'Arabic' : 'English'} (the WhatsApp confirmation is in it)`,
     ...(b.notes ? [`Notes: ${b.notes}`] : []),
     ...[contactLine(b.booking_contact), cancelLine(b)].filter((l): l is string => Boolean(l)),
     '',
@@ -138,7 +161,7 @@ export async function notifyTelegram(b: BookingAlert): Promise<string | null> {
   const first = await sendTelegram(text, {
     reply_markup: {
       inline_keyboard: [
-        ...(studio ? [[{ text: '📲 Send request to studio', url: studio }]] : []),
+        ...(studio ? [[{ text: STUDIO_BUTTON, url: studio }]] : []),
         [{ text: '💬 Send WhatsApp confirmation', url: wa }],
         actionRow(b.booking_id)
       ]

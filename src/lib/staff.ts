@@ -32,7 +32,7 @@ export function toTrainer(r: StaffRow | null | undefined): Trainer | null {
     gender: r.gender === 'male' || r.gender === 'female' ? r.gender : null,
     title: r.title_en || null,
     title_ar: r.title_ar || null,
-    photo_url: publicImage(r.photo_url)
+    photo_url: publicImage(r.photo_url, 'avatar')
   };
 }
 

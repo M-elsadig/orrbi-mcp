@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { claudeDomain, uiProfile } from '../src/widget.js';
-import { coverImage } from '../src/lib/images.js';
+import { coverImage, galleryImages, publicImage } from '../src/lib/images.js';
 import { dayLabel, priceLabel, strings, timeLabel } from '../ui/src/i18n.js';
 
 /* ── ui.domain ── */
@@ -35,8 +35,19 @@ test('MCP_PUBLIC_URL overrides the Claude connector URL', () => {
 
 const STORAGE = 'https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/object/public/businesses/falcon.jpg';
 
-test('uses the first image when it is in our public storage', () => {
-  assert.equal(coverImage([STORAGE, 'https://other.example/x.jpg']), STORAGE);
+const RENDERED = (w: number) =>
+  `https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/render/image/public/businesses/falcon.jpg?width=${w}&quality=70`;
+
+test('uses the first image when it is in our public storage, resized for the card', () => {
+  assert.equal(coverImage([STORAGE, 'https://other.example/x.jpg']), RENDERED(400));
+});
+
+test('the gym page photos are 800px, trainer photos 160px, spaces in names kept encoded', () => {
+  assert.deepEqual(galleryImages([STORAGE]), [RENDERED(800)]);
+  assert.equal(publicImage(STORAGE, 'avatar'), RENDERED(160));
+  assert.equal(publicImage(STORAGE), STORAGE);
+  assert.equal(publicImage('https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/object/public/business-images/aflete/aflete%201.jpeg', 'thumb'),
+    'https://ycbmspmgyrbgwmybauos.supabase.co/storage/v1/render/image/public/business-images/aflete/aflete%201.jpeg?width=400&quality=70');
 });
 
 test('drops anything the widget CSP would block', () => {

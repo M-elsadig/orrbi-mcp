@@ -285,11 +285,11 @@ test('the model hears the trainer, never the screening', () => {
 
 test('fullscreen leaves room for Claude\'s chat input on a phone, even when the host reports no inset', () => {
   assert.equal(bottomClear({ platform: 'mobile', safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 } }, false), COMPOSER_CLEAR_PX);
-  assert.ok(COMPOSER_CLEAR_PX >= 120);
+  assert.ok(COMPOSER_CLEAR_PX >= 140 + 60, 'clears a 140px input with room to spare');
   assert.equal(bottomClear({ deviceCapabilities: { touch: true } }, false), COMPOSER_CLEAR_PX);
   assert.equal(bottomClear({}, true), COMPOSER_CLEAR_PX);
   /* a host that reports a bigger inset wins */
-  assert.equal(bottomClear({ platform: 'mobile', safeAreaInsets: { top: 0, right: 0, bottom: 200, left: 0 } }, false), 216);
+  assert.equal(bottomClear({ platform: 'mobile', safeAreaInsets: { top: 0, right: 0, bottom: 300, left: 0 } }, false), 316);
   /* desktop: just a little air */
   assert.equal(bottomClear({ platform: 'web' }, false), 24);
 });

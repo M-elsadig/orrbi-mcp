@@ -17,6 +17,10 @@ export type Keyboard = { inline_keyboard: Button[][] };
 /* callback_data is capped at 64 bytes: "c:" + a 36-char uuid fits. */
 const CODES: Record<string, Outcome> = { c: 'confirmed', f: 'failed', n: 'no_show' };
 
+/* The alert's WhatsApp request to the business (telegram.ts). Named once so
+   keyboardAfter can tell it apart from the customer's link. */
+export const STUDIO_BUTTON = '📲 Send request to studio';
+
 export function actionRow(bookingId: string): Button[] {
   return [
     { text: '✅ Confirmed', callback_data: `c:${bookingId}` },
@@ -79,7 +83,10 @@ export function textAfter(original: string, status: string, when: string, noShow
    anything else → the WhatsApp confirmation as it was
    The ✅/❌ row goes away either way, so a booking can't be flipped twice. */
 export function keyboardAfter(original: Keyboard | undefined, status: string, bookingId: string): Keyboard | undefined {
-  const wa = original?.inline_keyboard.flat().find((b) => b.url?.startsWith('https://wa.me/'))?.url;
+  /* the customer's link: the alert's first row may be the 📲 request to the
+     studio, which must never become the "confirmation" */
+  const wa = original?.inline_keyboard.flat()
+    .find((b) => b.url?.startsWith('https://wa.me/') && b.text !== STUDIO_BUTTON)?.url;
   const rows: Button[][] = [];
   if (status === 'failed' || status === 'no_show') {
     if (wa) rows.push([{ text: '💬 WhatsApp the customer', url: wa.split('?')[0] }]);

@@ -34,10 +34,28 @@ export function paymentNote(p: Omit<PayInfo, 'price_qar'> & { price_qar?: number
     : `Pay${amount} at ${venue(p.category, lang)} when you arrive. Orrbi only reserves your spot and never takes payment.`;
 }
 
+/* Hours with Arabic number agreement: ساعة واحدة · ساعتين · 3–10 ساعات ·
+   11+ ساعة ("24 ساعة", never "24 ساعات"). ساعتين is the form after حتى. */
+export function arabicHours(n: number): string {
+  if (n === 1) return 'ساعة واحدة';
+  if (n === 2) return 'ساعتين';
+  if (n >= 3 && n <= 10) return `${n} ساعات`;
+  return `${n} ساعة`;
+}
+
 /* "Free cancellation up to 4 hours before the start." null when unset. */
 export function cancellationText(hours: number | null | undefined, lang: Lang = 'en'): string | null {
   if (hours == null) return null;
   return lang === 'ar'
-    ? `الإلغاء مجاني حتى ${hours} ساعات قبل الموعد.`
-    : `Free cancellation up to ${hours} hours before the start.`;
+    ? `الإلغاء مجاني حتى ${arabicHours(hours)} قبل الموعد.`
+    : `Free cancellation up to ${hours === 1 ? '1 hour' : `${hours} hours`} before the start.`;
+}
+
+/* The customer's WhatsApp: where to pay, by the business's own name.
+   "Pay 160 QAR at Studio 11 Fitness on arrival." null when not paid there. */
+export function payOnArrival(p: PayInfo, business: string, lang: Lang = 'en'): string | null {
+  if (!p.pay_at_venue) return null;
+  return lang === 'ar'
+    ? `ادفع ${number(p.price_qar)} ر.ق في ${business} عند الحضور.`
+    : `Pay ${number(p.price_qar)} QAR at ${business} on arrival.`;
 }

@@ -49,23 +49,6 @@ function header(lang: Lang, onBack: (() => void) | undefined, title: string, sub
 
 /* ── Shared bits ────────────────────────────────────────────────────────── */
 
-/* a stable hue per business, so its initial keeps its colour between calls */
-function hueFor(text: string): number {
-  let n = 0;
-  for (const ch of text) n = (n * 31 + ch.codePointAt(0)!) % 360;
-  return n;
-}
-
-/* The initial is a logo stand-in, so it comes from the English name in both
-   languages: the same letter and colour everywhere, and no bare alef (ا),
-   which reads as a vertical line on its own. */
-function initial(englishName: string, cls: string): HTMLElement {
-  const letter = Array.from(englishName.trim())[0]?.toUpperCase() ?? '?';
-  const el = h('div', { class: `${cls} placeholder`, 'aria-hidden': 'true' }, h('span', {}, letter));
-  el.style.setProperty('--hue', String(hueFor(englishName)));
-  return el;
-}
-
 /* "From 100 QAR" on the compact card: no "pay at the gym" there, that is
    said on the gym page and at the review step */
 function fromLabel(qar: number | null | undefined, lang: Lang, pay?: { pay_at_venue?: boolean; category?: string }): string | null {
@@ -103,7 +86,7 @@ export function viewCards(r: CardsResult, lang: Lang, on: CardsHandlers): HTMLEl
     const name = pick(g.name, g.name_ar, lang);
     const price = fromLabel(g.from_price_qar, lang);
     const inner = [
-      cover(g.image_url, g.name, 'gc-photo'),
+      photo(g.image_url, 'gc-photo'),
       h('span', { class: 'gc-body' },
         h('span', { class: 'gc-name' }, name),
         h('span', { class: 'gc-meta' }, [g.area, price].filter(Boolean).join(' · '))
@@ -147,12 +130,23 @@ function dayName(ymd: string, lang: Lang, today: string): string {
   return top === strings(lang).today || top === strings(lang).tomorrow ? top : dayFromDate(ymd, lang);
 }
 
-/* a photo, or the gym's initial when it has none or it fails to load */
-function cover(src: string | null | undefined, englishName: string, cls: string): HTMLElement {
-  if (!src) return initial(englishName, cls);
-  const img = h('img', { class: cls, src, alt: '', loading: 'lazy', decoding: 'async' });
-  img.addEventListener('error', () => img.replaceWith(initial(englishName, cls)), { once: true });
-  return img;
+/* A photo in a box that keeps its size: a skeleton until the image arrives,
+   then it fades in (opacity only). No photo, or one that fails, leaves a
+   calm empty surface: never a blank hole, never a letter. Lazy unless it is
+   the one photo worth fetching first (the gym page's cover). */
+function photo(src: string | null | undefined, cls: string, opts: { eager?: boolean; alt?: string } = {}): HTMLElement {
+  const box = h('div', { class: `ph ${cls} ${src ? 'loading' : 'empty'}`, 'aria-hidden': opts.alt ? undefined : 'true' });
+  if (!src) return box;
+  const img = h('img', {
+    src, alt: opts.alt ?? '', decoding: 'async', loading: opts.eager ? 'eager' : 'lazy',
+    ...(opts.eager ? { fetchpriority: 'high' } : {})
+  }) as HTMLImageElement;
+  const ready = () => box.classList.remove('loading');
+  img.addEventListener('load', ready, { once: true });
+  img.addEventListener('error', () => { img.remove(); box.classList.replace('loading', 'empty'); }, { once: true });
+  box.append(img);
+  if (img.complete && img.naturalWidth) ready();   // already in the cache
+  return box;
 }
 
 /* ── Gym page: the tend-app detail sheet, in the card ───────────────────── */
@@ -192,6 +186,43 @@ function pin(): SVGElement {
   return svg;
 }
 
+function buildHero(photos: string[], name: string, lang: Lang, onBack?: () => void): HTMLElement {
+  let hero: HTMLElement;
+  if (photos.length) {
+    /* only the cover is fetched first; the rest load as they come into view */
+    const track = h('div', { class: 'gp-track' },
+      ...photos.map((src, i) => photo(src, 'gp-shot', { eager: i === 0, alt: i === 0 ? name : '' })));
+    const dots = photos.length > 1
+      ? h('div', { class: 'gp-dots', 'aria-hidden': 'true' }, ...photos.map((_, i) => h('span', { class: i === 0 ? 'on' : undefined })))
+      : null;
+    if (dots) {
+      /* at most one update per frame, and only when the photo changes */
+      let shown = 0, queued = false;
+      track.addEventListener('scroll', () => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => {
+          queued = false;
+          const i = Math.round(Math.abs(track.scrollLeft) / Math.max(1, track.clientWidth));
+          if (i === shown) return;
+          dots.children[shown]?.classList.remove('on');
+          dots.children[i]?.classList.add('on');
+          shown = i;
+        });
+      }, { passive: true });
+    }
+    hero = h('div', { class: 'gp-hero' }, track, dots);
+  } else {
+    hero = h('div', { class: 'gp-hero' }, photo(null, 'gp-shot'));
+  }
+  if (onBack) {
+    const back = backButton(lang, onBack);
+    back.classList.add('gp-back');
+    hero.append(back);
+  }
+  return hero;
+}
+
 const section = (label: string, ...body: (Node | null)[]) =>
   h('section', { class: 'gp-sec' }, h('h4', { class: 'gp-label' }, label), ...body);
 
@@ -205,31 +236,17 @@ export function viewGymPage(step: GymStep, lang: Lang, on: GymHandlers): HTMLEle
   const name = pick(g.name, g.name_ar, lang);
   const photos = page?.images?.length ? page.images : g.image_url ? [g.image_url] : [];
 
-  /* ── photos: swipe, with dots ── */
+  /* ── photos: swipe (native scroll-snap), with dots. Built once per photo
+     set and reused on every redraw of the page (a tap on a day or time),
+     so photos are never re-created, re-decoded or reset while browsing. */
+  const heroKey = photos.join('|');
   let hero: HTMLElement;
-  if (photos.length) {
-    const track = h('div', { class: 'gp-track' }, ...photos.map((src, i) => {
-      const img = h('img', { class: 'gp-shot', src, alt: i === 0 ? name : '', loading: i < 2 ? 'eager' : 'lazy', decoding: 'async' });
-      img.addEventListener('error', () => img.remove(), { once: true });
-      return img;
-    }));
-    const dots = photos.length > 1
-      ? h('div', { class: 'gp-dots', 'aria-hidden': 'true' }, ...photos.map((_, i) => h('span', { class: i === 0 ? 'on' : undefined })))
-      : null;
-    if (dots) {
-      track.addEventListener('scroll', () => {
-        const i = Math.round(Math.abs(track.scrollLeft) / Math.max(1, track.clientWidth));
-        dots.querySelectorAll('span').forEach((d, j) => d.classList.toggle('on', i === j));
-      }, { passive: true });
-    }
-    hero = h('div', { class: 'gp-hero' }, track, dots);
+  if (step.hero && step.heroKey === heroKey) {
+    hero = step.hero;
   } else {
-    hero = h('div', { class: 'gp-hero' }, initial(g.name, 'gp-shot'));
-  }
-  if (on.onBack) {
-    const back = backButton(lang, on.onBack);
-    back.classList.add('gp-back');
-    hero.append(back);
+    hero = buildHero(photos, name, lang, on.onBack);
+    step.hero = hero;
+    step.heroKey = heroKey;
   }
 
   const pay = { pay_at_venue: page?.pay_at_venue ?? g.pay_at_venue, category: g.category };
@@ -384,12 +401,9 @@ function plusDays(ymd: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/* a trainer's photo, or their initial when there is none (or it fails) */
+/* a trainer's photo; a quiet empty circle when there is none */
 function trainerPhoto(p: Trainer): HTMLElement {
-  if (!p.photo_url) return initial(p.name, 'avatar');
-  const img = h('img', { class: 'avatar', src: p.photo_url, alt: '', loading: 'lazy', decoding: 'async' });
-  img.addEventListener('error', () => img.replaceWith(initial(p.name, 'avatar')), { once: true });
-  return img;
+  return photo(p.photo_url, 'avatar');
 }
 
 /* ── Class: which class at the time picked ──────────────────────────────── */
