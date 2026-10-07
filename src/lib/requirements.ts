@@ -22,6 +22,10 @@ export type Requirement = {
   flag_answer: boolean | null;
   flag_note: string | null;
   flag_note_ar: string | null;
+  /* the condition as a short list item ("Epilepsy or a seizure disorder")
+     for "Do any of these apply to you?"; missing = use text */
+  short?: string | null;
+  short_ar?: string | null;
 };
 
 export type Answer = { id: string; answer: boolean };
@@ -30,9 +34,10 @@ type Row = {
   id: string; business_id: string; service_id: string | null; kind: string; key: string;
   text_en: string; text_ar: string | null; flag_answer: boolean | null;
   flag_note_en: string | null; flag_note_ar: string | null; sort: number | null;
+  short_en: string | null; short_ar: string | null;
 };
 
-const SELECT = 'id,business_id,service_id,kind,key,text_en,text_ar,flag_answer,flag_note_en,flag_note_ar,sort';
+const SELECT = 'id,business_id,service_id,kind,key,text_en,text_ar,short_en,short_ar,flag_answer,flag_note_en,flag_note_ar,sort';
 
 function toRequirement(r: Row): Requirement {
   return {
@@ -44,7 +49,9 @@ function toRequirement(r: Row): Requirement {
     text_ar: r.text_ar || null,
     flag_answer: r.kind === 'question' && typeof r.flag_answer === 'boolean' ? r.flag_answer : null,
     flag_note: r.flag_note_en || null,
-    flag_note_ar: r.flag_note_ar || null
+    flag_note_ar: r.flag_note_ar || null,
+    short: r.short_en || null,
+    short_ar: r.short_ar || null
   };
 }
 
@@ -93,15 +100,18 @@ export function requirementOut(r: Requirement) {
     kind: r.kind,
     text: r.text,
     text_ar: r.text_ar,
+    ...(r.short ? { short: r.short, short_ar: r.short_ar ?? null } : {}),
     ...(r.flag_answer !== null ? { flag_answer: r.flag_answer, flag_note: r.flag_note, flag_note_ar: r.flag_note_ar } : {})
   };
 }
 
-/* For the model: how to handle them, said once next to the list */
+/* For the model: the same one-step pattern as the card, said once next to the list */
 export const REQUIREMENTS_NOTE =
-  'This business has requirements to answer before booking. Before create_booking, ask the user each one word for word ' +
-  '(questions: yes or no; notices: they must agree), never answer for them or assume, include their answers in the read-back, ' +
-  'and pass them as requirements. A flagged answer does not stop the booking: pass on its flag_note.';
+  'This business has requirements to answer before booking. Before create_booking, ask them in ONE message, not one by one: ' +
+  'list the questions (short, or text when there is no short) and ask "Do any of these apply to you?". ' +
+  'If the user says none apply, every question\'s answer is false. If one or more apply, ask which, and those are true, the rest false. ' +
+  'Notices: the user must agree to each. Never answer for the user or assume "none"; include their answer in the read-back, ' +
+  'and pass every question in requirements. An answer that applies does not stop the booking: pass on its flag_note.';
 
 /* the line the customer is told when an answer was flagged; one per note */
 export function flagNotes(flagged: Requirement[]): string[] {

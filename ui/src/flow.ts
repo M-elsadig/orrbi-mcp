@@ -6,7 +6,8 @@ import type { BookingErrorKind, FieldErrors } from './booking.js';
      availability            times (one class) → details → review → requested
    For a 1:1 appointment the "class" step picks the trainer (one slot per
    trainer at the time picked). A business with pre-booking requirements
-   (e.g. a health screening) adds a requirements step after details.
+   (e.g. a health screening) adds one requirements screen after details:
+   "Do any of these apply to you?" → none, or tick which.
    The gym page opens fullscreen where the host allows it. Pure state (no
    DOM) so it can be tested; the controller renders whatever step is on
    top. Each step keeps what it loaded, so Back is instant and never
@@ -56,7 +57,9 @@ export type Step =
   /* data missing = loading; error set = failed */
   | { kind: 'times'; choice: Choice; data?: AvailabilityResult; error?: string; selected?: string }
   | { kind: 'details'; choice: Choice; slot: Slot; form: DetailsForm; fieldErrors: FieldErrors }
-  | { kind: 'requirements'; choice: Choice; slot: Slot; name: string; phone: string; answers: Answers }
+  /* one screen: "Do any of these apply?" → none, or tick which (some = true).
+     picks: the ticked conditions and agreed notices, nothing else */
+  | { kind: 'requirements'; choice: Choice; slot: Slot; name: string; phone: string; picks: Answers; some?: boolean }
   | {
       kind: 'review'; choice: Choice; slot: Slot; name: string; phone: string;
       answers?: Answers;
@@ -157,6 +160,21 @@ export function requirementsFor(page: Pick<GymPage, 'requirements'>, serviceId: 
 /* Every question answered yes or no, every notice agreed to */
 export function answered(reqs: Requirement[], answers: Answers): boolean {
   return reqs.every((r) => (r.kind === 'notice' ? answers[r.id] === true : typeof answers[r.id] === 'boolean'));
+}
+
+/* The one-screen answer as one true/false per question, the shape
+   create_booking stores. "none": every question false. "some": the ticked
+   ones true, the rest false, and at least one must be ticked. Notices must
+   be agreed either way. null = not answerable yet (nothing is assumed). */
+export function answersFrom(reqs: Requirement[], picks: Answers, applies: 'none' | 'some'): Answers | null {
+  const questions = reqs.filter((r) => r.kind === 'question');
+  const notices = reqs.filter((r) => r.kind === 'notice');
+  if (notices.some((n) => picks[n.id] !== true)) return null;
+  if (applies === 'some' && !questions.some((q) => picks[q.id] === true)) return null;
+  const out: Answers = {};
+  for (const q of questions) out[q.id] = applies === 'some' && picks[q.id] === true;
+  for (const n of notices) out[n.id] = true;
+  return out;
 }
 
 /* The answers that need the business's attention */

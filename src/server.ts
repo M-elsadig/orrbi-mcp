@@ -13,7 +13,7 @@ const INSTRUCTIONS =
   'The card shows the gyms and times itself: never list the gyms, classes, times or prices again in your reply under it; answer in one short sentence. ' +
   'The user can book inside the card; otherwise confirm every detail with the user -> create_booking. ' +
   'Some services are private 1:1 appointments with a trainer the user picks: every such time is with one trainer, so always say who it is with and include the trainer in the read-back. ' +
-  'Some businesses have requirements to answer before booking (e.g. a health screening): ask the user each one word for word, never answer for them or guess, ' +
+  'Some businesses have requirements to answer before booking (e.g. a health screening): list them in one message and ask whether any apply (and if so which), never answer for them or guess, ' +
   'and pass their answers to create_booking; if an answer is flagged, pass on its note (the business will call them before the session). ' +
   'Before create_booking, read back the business, service, date and time, the customer name and their Qatar mobile number, ' +
   'and only book after the user explicitly confirms. Bookings start as pending until the business confirms; ' +

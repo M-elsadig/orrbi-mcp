@@ -2,7 +2,7 @@ import type {
   AvailabilityResult, BookingResult, CardsResult, ClassSlot, Day, GymCard, GymPage, NextTime, Requirement, Slot, ToolName, Trainer
 } from './types';
 import {
-  type Answers, type Choice, type DetailsForm, type GymStep, answered, classesAt, flaggedBy, shownDay, slotsByDay, timesOn
+  type Answers, type Choice, type DetailsForm, type GymStep, classesAt, flaggedBy, shownDay, slotsByDay, timesOn
 } from './flow';
 import { type BookingErrorKind, type FieldErrors, validateDetails } from './booking';
 import { cancellationText } from '../../src/lib/payment.js';
@@ -257,19 +257,21 @@ export function viewGymPage(step: GymStep, lang: Lang, on: GymHandlers): HTMLEle
     body = gymBody(step, page, lang, on);
   }
 
-  /* the sticky bar: what will be booked, or what to do first */
-  let bar: HTMLElement | null = null;
-  if (page) {
+  /* Book: what will be booked, or what to do first. Right under the times
+     (the first section), in the page's flow: never pinned to the bottom,
+     where the host's chat input can cover it. */
+  if (page && !step.error) {
     const picked = !!step.time && classesAt(page, step.time).length > 0;
     const book = h('button', { class: 'btn accent', type: 'button', disabled: !picked },
       picked ? t.bookAt(timeLabel(step.time!, lang)) : t.bookNow);
     book.addEventListener('click', () => { if (picked) on.onBook(); });
-    bar = h('div', { class: 'gp-bar' },
+    const bar = h('div', { class: 'gp-bar' },
       picked ? null : h('p', { class: 'caption', role: 'status' }, step.time ? t.timeGone : t.pickTimeFirst),
       book);
+    body.splice(1, 0, bar);
   }
 
-  return h('article', { class: 'gp' }, hero, h('div', { class: 'gp-body' }, head, ...body), bar);
+  return h('article', { class: 'gp' }, hero, h('div', { class: 'gp-body' }, head, ...body));
 }
 
 function gymBody(step: GymStep, page: GymPage, lang: Lang, on: GymHandlers): HTMLElement[] {
@@ -698,7 +700,16 @@ export function viewDetails(s: DetailsState, lang: Lang, on: DetailsHandlers): H
 
 /* ── Requirements: questions and notices before the request ─────────────── */
 
-export type RequirementsState = { choice: Choice; slot: Slot; answers: Answers };
+export type RequirementsState = { choice: Choice; slot: Slot; picks: Answers; some?: boolean };
+
+export type RequirementsHandlers = {
+  onBack: () => void;
+  /* tick a condition, or agree to a notice */
+  onPick: (id: string, value: boolean) => void;
+  onNone: () => void;
+  onSome: () => void;
+  onContinue: () => void;
+};
 
 /* the note shown for answers that need the business's attention, once each */
 function flagNote(reqs: Requirement[], answers: Answers, lang: Lang): HTMLElement | null {
@@ -706,44 +717,66 @@ function flagNote(reqs: Requirement[], answers: Answers, lang: Lang): HTMLElemen
   return notes.length ? h('div', { class: 'flag-note', role: 'status' }, ...notes.map((n) => h('p', {}, n))) : null;
 }
 
-/* Yes/No per question (nothing preselected: the customer answers each one),
-   a checkbox per notice; Continue only once everything is answered. */
-export function viewRequirements(
-  s: RequirementsState, lang: Lang, on: { onBack: () => void; onAnswer: (id: string, value: boolean) => void; onContinue: () => void }
-): HTMLElement {
+const conditionText = (r: Requirement, lang: Lang) => pick(r.short || r.text, r.short_ar || r.text_ar, lang);
+
+/* One screen for every business with requirements: "Do any of these apply
+   to you?", the conditions as a short list, then "None of these apply to
+   me" or "One or more applies". Nothing is preselected and the two buttons
+   look the same, so neither reads as the default. "One or more" turns the
+   list into ticks (at least one), shows what happens next, and continues.
+   Notices are checkboxes the customer must agree to first. */
+export function viewRequirements(s: RequirementsState, lang: Lang, on: RequirementsHandlers): HTMLElement {
   const t = strings(lang);
   const reqs = s.choice.requirements ?? [];
-  const done = answered(reqs, s.answers);
+  const questions = reqs.filter((r) => r.kind === 'question');
+  const notices = reqs.filter((r) => r.kind === 'notice');
+  const agreed = notices.every((n) => s.picks[n.id] === true);
 
-  const items = reqs.map((r, i) => {
-    const text = pick(r.text, r.text_ar, lang);
-    if (r.kind === 'notice') {
-      const box = h('input', { type: 'checkbox', id: `rq-${i}`, checked: s.answers[r.id] === true });
-      box.addEventListener('change', () => on.onAnswer(r.id, (box as HTMLInputElement).checked));
-      return h('li', { class: 'rq notice' }, h('label', { for: `rq-${i}`, class: 'rq-check' }, box, h('span', {}, text)));
-    }
-    const choice = (value: boolean) => {
-      const isOn = s.answers[r.id] === value;
-      const btn = h('button', { class: `rq-opt${isOn ? ' on' : ''}`, type: 'button', 'aria-pressed': isOn ? 'true' : 'false' },
-        value ? t.yes : t.no);
-      btn.addEventListener('click', () => on.onAnswer(r.id, value));
-      return btn;
-    };
-    return h('li', { class: 'rq' },
-      h('p', { class: 'rq-text', id: `rq-${i}` }, text),
-      h('div', { class: 'rq-opts', role: 'group', 'aria-labelledby': `rq-${i}` }, choice(true), choice(false)));
-  });
+  const noticeList = notices.length
+    ? h('ul', { class: 'rq-list' }, ...notices.map((r, i) => {
+        const box = h('input', { type: 'checkbox', id: `rq-n${i}`, checked: s.picks[r.id] === true });
+        box.addEventListener('change', () => on.onPick(r.id, (box as HTMLInputElement).checked));
+        return h('li', { class: 'rq notice' }, h('label', { for: `rq-n${i}`, class: 'rq-check' }, box, h('span', {}, pick(r.text, r.text_ar, lang))));
+      }))
+    : null;
 
-  const next = h('button', { class: 'btn accent', type: 'button', disabled: !done }, t.continue);
-  next.addEventListener('click', () => { if (done) on.onContinue(); });
+  const head = header(lang, on.onBack, s.some ? t.whichApply : t.anyApply, pick(s.choice.business_name, s.choice.business_name_ar, lang));
+
+  if (!s.some) {
+    const none = h('button', { class: 'btn secondary', type: 'button', disabled: !agreed }, t.noneApply);
+    const some = h('button', { class: 'btn secondary', type: 'button', disabled: !agreed }, t.someApply);
+    none.addEventListener('click', () => { if (agreed) on.onNone(); });
+    some.addEventListener('click', () => { if (agreed) on.onSome(); });
+    return h('section', { class: 'card pad' },
+      head,
+      questions.length ? h('ul', { class: 'rq-conditions' }, ...questions.map((r) => h('li', {}, conditionText(r, lang)))) : null,
+      noticeList,
+      agreed ? null : h('p', { class: 'caption', role: 'status' }, t.agreeFirst),
+      h('div', { class: 'rq-choices', role: 'group', 'aria-label': t.anyApply }, none, some),
+      h('p', { class: 'caption' }, t.requirementsIntro)
+    );
+  }
+
+  /* "One or more applies": tick which */
+  const ticked = questions.some((q) => s.picks[q.id] === true);
+  const ready = ticked && agreed;
+  const ticks = h('ul', { class: 'rq-list' }, ...questions.map((r, i) => {
+    const box = h('input', { type: 'checkbox', id: `rq-q${i}`, checked: s.picks[r.id] === true });
+    box.addEventListener('change', () => on.onPick(r.id, (box as HTMLInputElement).checked));
+    return h('li', { class: 'rq' }, h('label', { for: `rq-q${i}`, class: 'rq-check' }, box, h('span', {}, conditionText(r, lang))));
+  }));
+  const asAnswers = Object.fromEntries(questions.map((q) => [q.id, s.picks[q.id] === true]));
+  const next = h('button', { class: 'btn accent', type: 'button', disabled: !ready }, t.continue);
+  next.addEventListener('click', () => { if (ready) on.onContinue(); });
 
   return h('section', { class: 'card pad' },
-    header(lang, on.onBack, t.beforeYouBook, pick(s.choice.business_name, s.choice.business_name_ar, lang)),
-    h('p', { class: 'meta' }, t.requirementsIntro),
-    h('ul', { class: 'rq-list' }, ...items),
-    flagNote(reqs, s.answers, lang),
-    done ? null : h('p', { class: 'caption', role: 'status' }, t.answerAll),
-    next
+    head,
+    ticks,
+    noticeList,
+    ticked ? flagNote(questions, asAnswers, lang) : null,
+    ready ? null : h('p', { class: 'caption', role: 'status' }, ticked ? t.agreeFirst : t.tickAtLeastOne),
+    next,
+    h('p', { class: 'caption' }, t.requirementsIntro)
   );
 }
 
@@ -753,6 +786,12 @@ export type ReviewState = {
   choice: Choice; slot: Slot; name: string; phone: string; answers?: Answers;
   error?: BookingErrorKind; retime?: boolean; busy?: boolean;
 };
+
+/* "None apply" / "2 apply" on the review step */
+function appliesSummary(reqs: Requirement[], answers: Answers, t: ReturnType<typeof strings>): string {
+  const n = reqs.filter((r) => r.kind === 'question' && answers[r.id] === true).length;
+  return n ? t.reviewSome(n) : t.reviewNone;
+}
 
 export function viewReview(s: ReviewState, lang: Lang, on: { onBack: () => void; onSend: () => void; onRetime: () => void }): HTMLElement {
   const t = strings(lang);
@@ -775,7 +814,7 @@ export function viewReview(s: ReviewState, lang: Lang, on: { onBack: () => void;
     h('dl', { class: 'rows' },
       row(t.yourName, s.name),
       row(t.yourMobile, s.phone, 'ref'),
-      s.choice.requirements?.length ? row(t.beforeYouBook, t.answersGiven) : null
+      s.choice.requirements?.length ? row(t.beforeYouBook, appliesSummary(s.choice.requirements, s.answers ?? {}, t)) : null
     ),
     s.choice.requirements?.length ? flagNote(s.choice.requirements, s.answers ?? {}, lang) : null,
     h('p', { class: 'request-note' }, t.requestNote(business)),

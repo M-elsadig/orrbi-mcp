@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Flow, answered, choiceFromAvailability, classesAt, flaggedBy, fromClass, openGym, requirementsFor, shownDay, slotsByDay, timesOn
+  Flow, answered, answersFrom, choiceFromAvailability, classesAt, flaggedBy, fromClass, openGym, requirementsFor, shownDay, slotsByDay, timesOn
 } from '../ui/src/flow.js';
 import { bookedNote, bookingArgs, classifyBookingError, newRequestId, validateDetails } from '../ui/src/booking.js';
+import { COMPOSER_CLEAR_PX, bottomClear } from '../ui/src/layout.js';
 import type { BookingResult, CardsResult, ClassSlot, GymCard, GymPage, Requirement, Slot } from '../ui/src/types.js';
 
 const card: GymCard = {
@@ -213,6 +214,40 @@ test('continue only when every question is answered; a Yes is flagged, not block
   assert.equal(answered([notice], { n: true }), true);
 });
 
+/* ── one screen: "Do any of these apply to you?" ── */
+
+test('"None of these apply" answers every question false, in the shape create_booking stores', () => {
+  assert.deepEqual(answersFrom([pacemaker, pregnant], {}, 'none'), { 'r-pace': false, 'r-preg': false });
+});
+
+test('"One or more applies": the ticked ones true, the rest false, and one tick is required', () => {
+  const reqs = [pacemaker, pregnant];
+  assert.equal(answersFrom(reqs, {}, 'some'), null);
+  assert.equal(answersFrom(reqs, { 'r-pace': false }, 'some'), null);
+  const a = answersFrom(reqs, { 'r-preg': true }, 'some')!;
+  assert.deepEqual(a, { 'r-pace': false, 'r-preg': true });
+  assert.ok(answered(reqs, a));
+  /* booking still goes through, flagged */
+  assert.deepEqual(flaggedBy(reqs, a).map((r) => r.id), ['r-preg']);
+});
+
+test('ticks from "one or more" do not leak into "none"', () => {
+  assert.deepEqual(answersFrom([pacemaker, pregnant], { 'r-pace': true }, 'none'), { 'r-pace': false, 'r-preg': false });
+});
+
+test('notices must be agreed before either answer', () => {
+  const notice: Requirement = { id: 'n', kind: 'notice', text: 'I will arrive 10 minutes early' };
+  assert.equal(answersFrom([pacemaker, notice], {}, 'none'), null);
+  assert.deepEqual(answersFrom([pacemaker, notice], { n: true }, 'none'), { 'r-pace': false, n: true });
+  assert.equal(answersFrom([pacemaker, notice], { 'r-pace': true }, 'some'), null);
+});
+
+test('the answer from the one screen goes to create_booking as one entry per question', () => {
+  const { choice } = fromClass(studio.week.slots[0], 24, requirementsFor(studio, 'discovery'));
+  const args = bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'en', answersFrom(choice.requirements!, {}, 'none')!);
+  assert.deepEqual(args.requirements, [{ id: 'r-pace', answer: false }, { id: 'r-preg', answer: false }]);
+});
+
 test('booking args send exactly the answers given, never a default', () => {
   const { choice } = fromClass(studio.week.slots[0], 24, requirementsFor(studio, 'discovery'));
   const full = bookingArgs(choice, slot, 'Mohamed', '+97455123456', 'req-1', 'en', { 'r-pace': true, 'r-preg': false });
@@ -226,7 +261,7 @@ test('requirements step sits between details and review, and Back returns to it'
   const { choice, slot: picked } = fromClass(studio.week.slots[0], 24, requirementsFor(studio, 'discovery'));
   const f = new Flow({ kind: 'cards', result: cards });
   f.push({ kind: 'details', choice, slot: picked, form: { name: '', phone: '' }, fieldErrors: {} });
-  f.push({ kind: 'requirements', choice, slot: picked, name: 'M', phone: '+97455123456', answers: { 'r-pace': false, 'r-preg': false } });
+  f.push({ kind: 'requirements', choice, slot: picked, name: 'M', phone: '+97455123456', picks: {} });
   f.push({ kind: 'review', choice, slot: picked, name: 'M', phone: '+97455123456', answers: { 'r-pace': false, 'r-preg': false }, requestId: 'x' });
   assert.ok(f.back());
   assert.equal(f.current.kind as string, 'requirements');
@@ -244,4 +279,17 @@ test('the model hears the trainer, never the screening', () => {
     health_note: 'Studio 11 will call you before your session.' });
   assert.match(note, /Discovery Session with Aaron Clarke at Studio 11 Fitness/);
   assert.doesNotMatch(note, /call you|health|screening/i);
+});
+
+/* ── room under the last button for the host's chat input ── */
+
+test('fullscreen leaves room for Claude\'s chat input on a phone, even when the host reports no inset', () => {
+  assert.equal(bottomClear({ platform: 'mobile', safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 } }, false), COMPOSER_CLEAR_PX);
+  assert.ok(COMPOSER_CLEAR_PX >= 120);
+  assert.equal(bottomClear({ deviceCapabilities: { touch: true } }, false), COMPOSER_CLEAR_PX);
+  assert.equal(bottomClear({}, true), COMPOSER_CLEAR_PX);
+  /* a host that reports a bigger inset wins */
+  assert.equal(bottomClear({ platform: 'mobile', safeAreaInsets: { top: 0, right: 0, bottom: 200, left: 0 } }, false), 216);
+  /* desktop: just a little air */
+  assert.equal(bottomClear({ platform: 'web' }, false), 24);
 });

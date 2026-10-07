@@ -5,10 +5,11 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import './styles.css';
 import { type Lang, dayLabel, langFor, pick, qatarDate, strings, timeLabel } from './i18n';
 import {
-  type Choice, type DetailsForm, Flow, type GymStep, type Step, answered, choiceFromAvailability, classesAt, fromClass, openGym,
+  type Choice, type DetailsForm, Flow, type GymStep, type Step, answersFrom, choiceFromAvailability, classesAt, fromClass, openGym,
   requirementsFor
 } from './flow';
 import { bookedNote, bookingArgs, classifyBookingError, newRequestId, validateDetails } from './booking';
+import { bottomClear } from './layout';
 import {
   type TimesMode, viewBooked, viewCards, viewClassPick, viewDetails, viewError, viewGymPage, viewRequirements, viewReview, viewSkeleton,
   viewTimes, viewTimesError, viewTimesLoading
@@ -88,6 +89,8 @@ function applyHost(ctx: McpUiHostContext | undefined) {
     s.setProperty('--safe-bottom', `${bottom}px`);
     s.setProperty('--safe-left', `${left}px`);
   }
+  /* nothing may end up under the host's chat input (see layout.ts) */
+  document.documentElement.style.setProperty('--bottom-clear', `${bottomClear(ctx, matchMedia('(pointer: coarse)').matches)}px`);
   if (ctx.displayMode) setMode(ctx.displayMode);
   tool ??= toolFromContext(ctx);
   applyLocale(ctx);
@@ -111,8 +114,9 @@ async function requestMode(mode: 'inline' | 'fullscreen') {
     const r = await app.requestDisplayMode({ mode });
     displayMode = r.mode;
     document.documentElement.dataset.mode = r.mode;
-  } catch {
+  } catch (e) {
     /* stays inline: the gym page renders inline just the same */
+    console.warn('[orrbi] display mode request failed', e);
   }
 }
 
@@ -196,25 +200,33 @@ function build(step: Step): HTMLElement {
           if (errors.name || errors.phone || !phone) return show('none');
           /* questions to answer first (e.g. a health screening), else straight to review */
           flow!.push(step.choice.requirements?.length
-            ? { kind: 'requirements', choice: step.choice, slot: step.slot, name, phone, answers: {} }
+            ? { kind: 'requirements', choice: step.choice, slot: step.slot, name, phone, picks: {} }
             : { kind: 'review', choice: step.choice, slot: step.slot, name, phone, requestId: newRequestId() });
           show('fwd');
         }
       });
 
-    case 'requirements':
+    case 'requirements': {
+      const reqs = step.choice.requirements ?? [];
+      /* to review with one true/false per question; nothing assumed */
+      const toReview = (applies: 'none' | 'some') => {
+        const answers = answersFrom(reqs, step.picks, applies);
+        if (!answers) return;
+        flow!.push({
+          kind: 'review', choice: step.choice, slot: step.slot, name: step.name, phone: step.phone,
+          answers, requestId: newRequestId()
+        });
+        show('fwd');
+      };
       return viewRequirements(step, lang, {
-        onBack: goBack,
-        onAnswer: (id, value) => { step.answers[id] = value; show('none'); },
-        onContinue: () => {
-          if (!answered(step.choice.requirements ?? [], step.answers)) return;
-          flow!.push({
-            kind: 'review', choice: step.choice, slot: step.slot, name: step.name, phone: step.phone,
-            answers: { ...step.answers }, requestId: newRequestId()
-          });
-          show('fwd');
-        }
+        /* from "which ones" back to the question, else to the details */
+        onBack: () => { if (step.some) { step.some = false; show('back'); } else goBack(); },
+        onPick: (id, value) => { step.picks[id] = value; show('none'); },
+        onNone: () => toReview('none'),
+        onSome: () => { step.some = true; show('fwd'); },
+        onContinue: () => toReview('some')
       });
+    }
 
     case 'review':
       return viewReview(step, lang, {

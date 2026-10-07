@@ -129,12 +129,15 @@ const STRINGS = {
     trainer: 'Trainer',
     privateSession: 'Private 1:1',
     beforeYouBook: 'Before you book',
-    requirementsIntro: 'Please answer each question. Your answers go only to the business.',
-    yes: 'Yes',
-    no: 'No',
-    agree: 'I agree',
-    answerAll: 'Answer every question to continue.',
-    answersGiven: 'Answered'
+    anyApply: 'Do any of these apply to you?',
+    whichApply: 'Which ones apply to you?',
+    noneApply: 'None of these apply to me',
+    someApply: 'One or more applies',
+    requirementsIntro: 'Your answer goes only to the business.',
+    tickAtLeastOne: 'Tick the ones that apply to continue.',
+    agreeFirst: 'Agree to the notes above to continue.',
+    reviewNone: 'None apply',
+    reviewSome: (n: number) => (n === 1 ? '1 applies' : `${n} apply`)
   },
   ar: {
     placesFound: (n: number) => (n === 1 ? 'مكان واحد' : n === 2 ? 'مكانان' : `${n} أماكن`),
@@ -240,12 +243,15 @@ const STRINGS = {
     trainer: 'المدرب',
     privateSession: 'جلسة خاصة',
     beforeYouBook: 'قبل الحجز',
-    requirementsIntro: 'يرجى الإجابة عن كل سؤال. تصل إجاباتك إلى المكان فقط.',
-    yes: 'نعم',
-    no: 'لا',
-    agree: 'أوافق',
-    answerAll: 'أجب عن كل الأسئلة للمتابعة.',
-    answersGiven: 'تمت الإجابة'
+    anyApply: 'هل ينطبق عليك أيٌّ مما يلي؟',
+    whichApply: 'أيٌّ منها ينطبق عليك؟',
+    noneApply: 'لا ينطبق عليّ أيٌّ منها',
+    someApply: 'ينطبق عليّ واحد أو أكثر',
+    requirementsIntro: 'تصل إجابتك إلى المكان فقط.',
+    tickAtLeastOne: 'اختر ما ينطبق عليك للمتابعة.',
+    agreeFirst: 'وافق على الملاحظات أعلاه للمتابعة.',
+    reviewNone: 'لا ينطبق أيٌّ منها',
+    reviewSome: (n: number) => (n === 1 ? 'ينطبق واحد' : `ينطبق ${n}`)
   }
 } as const;
 

@@ -1,4 +1,4 @@
-import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
+import { AppBridge, type McpUiHostContext, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
 import widgetHtml from '../ui/dist/widget.html?raw';
 import fixture from './.data/fixture.json';
 
@@ -29,6 +29,26 @@ async function toBlobUrls(v: unknown): Promise<unknown> {
 const ready = toBlobUrls(data);
 
 const params = new URLSearchParams(location.search);
+
+/* ?w=375  ?overlay=120: Claude on a phone (an input box over the bottom
+   that the host does not report as a safe-area inset). ?nophotos=1 drops
+   the photos (the automation browser stalls on large inline images). */
+const width = Number(params.get('w')) || 0;
+const overlay = Number(params.get('overlay')) || 0;
+if (width) document.documentElement.style.setProperty('--stage-w', `${width}px`);
+if (overlay) {
+  document.documentElement.style.setProperty('--overlay-h', `${overlay}px`);
+  document.getElementById('overlay')!.hidden = false;
+}
+if (params.has('nophotos')) {
+  const strip = (v: unknown): unknown => {
+    if (typeof v === 'string' && v.startsWith('data:')) return null;
+    if (Array.isArray(v)) return v.map(strip).filter((x) => x !== null);
+    if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) (v as Record<string, unknown>)[k] = strip(x);
+    return v;
+  };
+  strip(fixture);
+}
 let lang: 'en' | 'ar' = params.get('lang') === 'ar' ? 'ar' : 'en';
 let mode: 'inline' | 'fullscreen' = 'inline';
 
@@ -48,20 +68,27 @@ function setMode(next: typeof mode) {
 }
 
 let bridge: AppBridge | null = null;
+let hostContext: McpUiHostContext = {};
 
 async function start() {
   bridge?.close().catch(() => undefined);
   setMode('inline');
   await ready;
 
+  hostContext = {
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    locale: lang === 'ar' ? 'ar-QA' : 'en-GB',
+    displayMode: 'inline',
+    availableDisplayModes: ['inline', 'fullscreen'],
+    ...(overlay ? {
+      platform: 'mobile' as const,
+      deviceCapabilities: { touch: true, hover: false },
+      safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    } : {}),
+    toolInfo: { tool: { name: 'search_businesses', inputSchema: { type: 'object' } } }
+  };
   const b = new AppBridge(null, { name: 'Orrbi preview', version: '1.0.0' }, { serverTools: {}, openLinks: {} }, {
-    hostContext: {
-      theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-      locale: lang === 'ar' ? 'ar-QA' : 'en-GB',
-      displayMode: 'inline',
-      availableDisplayModes: ['inline', 'fullscreen'],
-      toolInfo: { tool: { name: 'search_businesses', inputSchema: { type: 'object' } } }
-    }
+    hostContext
   });
   bridge = b;
 
@@ -92,8 +119,10 @@ async function start() {
     return { isError: true, content: [{ type: 'text', text: `${name} is not available in the preview.` }] };
   };
   b.onrequestdisplaymode = async ({ mode: m }) => {
+    console.log('[preview] display mode requested:', m);
     setMode(m === 'fullscreen' ? 'fullscreen' : 'inline');
-    b.setHostContext({ ...b.getHostContext(), displayMode: mode });
+    hostContext = { ...hostContext, displayMode: mode };
+    b.setHostContext(hostContext);
     return { mode };
   };
   b.onopenlink = async ({ url }) => {
@@ -125,7 +154,8 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-lang]')) {
 document.getElementById('close')!.addEventListener('click', () => {
   if (mode !== 'fullscreen' || !bridge) return;
   setMode('inline');
-  bridge.setHostContext({ ...bridge.getHostContext(), displayMode: 'inline' });
+  hostContext = { ...hostContext, displayMode: 'inline' };
+  bridge.setHostContext(hostContext);
 });
 
 void start();

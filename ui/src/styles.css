@@ -41,6 +41,12 @@
   --safe-bottom: 0px;
   --safe-left: 0px;
   --gap: 12px;
+  /* room under the last button in fullscreen; main.ts sets it from the
+     host context (layout.ts). Phones: Claude's chat input covers ~120px. */
+  --bottom-clear: 24px;
+}
+@media (pointer: coarse) {
+  :root { --bottom-clear: 140px; }
 }
 
 * { box-sizing: border-box; }
@@ -443,24 +449,21 @@ button.card.tappable:active { transform: scale(0.985); }
 }
 .disclose.open { transform: translateY(1px) rotate(225deg); }
 
-/* Book stays in reach while the page scrolls (fullscreen), above the
-   host's composer and the phone's home bar */
+/* Book sits right under the times, in the flow of the page. Not sticky: a
+   bar pinned to the bottom ends up under Claude's chat input on a phone,
+   where it can't be tapped. */
 .gp-bar {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   display: grid;
   gap: 6px;
-  padding: 12px 16px calc(12px + var(--safe-bottom));
-  background: color-mix(in oklab, var(--color-background-primary) 92%, transparent);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  border-block-start: var(--border-width-regular) solid var(--color-border-tertiary);
 }
 .gp-bar .caption { text-align: center; }
 
-/* fullscreen: the page is the whole view, edge to edge, scrolling itself */
-:root[data-mode="fullscreen"] #root { padding: var(--safe-top) var(--safe-right) 0 var(--safe-left); }
+/* fullscreen: the page is the whole view, edge to edge, scrolling itself;
+   every screen ends with room to scroll its last button clear of the
+   host's chat input */
+:root[data-mode="fullscreen"] #root {
+  padding: var(--safe-top) var(--safe-right) var(--bottom-clear) var(--safe-left);
+}
 :root[data-mode="fullscreen"] .gp { border: 0; border-radius: 0; min-height: 100dvh; display: flex; flex-direction: column; }
 :root[data-mode="fullscreen"] .gp-body { flex: 1; }
 :root[data-mode="fullscreen"] .gp-back { top: calc(10px + var(--safe-top)); }
@@ -566,20 +569,18 @@ button.card.tappable:active { transform: scale(0.985); }
 }
 .rq:last-child { border-block-end: 0; }
 .rq-text { font-size: var(--font-text-sm-size); line-height: 1.45; text-wrap: pretty; }
-.rq-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.rq-opt {
-  min-height: 44px;
-  border-radius: var(--border-radius-md);
-  border: var(--border-width-regular) solid var(--color-border-secondary);
-  background: transparent;
-  font: inherit;
-  font-weight: var(--font-weight-medium);
-  color: var(--color-text-primary);
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+/* "Do any of these apply?": the conditions, read-only, as a compact list */
+.rq-conditions {
+  margin: 0;
+  padding-inline-start: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: var(--font-text-sm-size);
+  line-height: 1.45;
+  color: var(--color-text-secondary);
 }
-.rq-opt.on { background: var(--acc); color: var(--acc-on); border-color: var(--acc); }
-.rq-opt:focus-visible { outline: 2px solid var(--color-ring-primary); outline-offset: 2px; }
+/* the two answers look the same: neither reads as the default */
+.rq-choices { display: grid; gap: 8px; }
 .rq-check { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; cursor: pointer; }
 .rq-check input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--acc); }
 /* a flagged answer: calm, it's what happens next, not an error */

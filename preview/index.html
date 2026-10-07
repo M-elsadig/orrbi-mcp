@@ -39,8 +39,16 @@
       background: var(--panel); color: var(--text); font: inherit; cursor: pointer;
     }
     button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+    /* a stand-in for Claude's chat input over the bottom of a phone */
+    #overlay {
+      position: absolute; inset-inline: 0; bottom: 0; height: var(--overlay-h, 120px); z-index: 3;
+      background: rgb(120 120 120 / 0.55); color: #fff; font-size: 12px;
+      display: grid; place-items: center; pointer-events: none;
+      border-top: 2px dashed rgb(255 255 255 / 0.7);
+    }
+    #overlay[hidden] { display: none; }
     #stage {
-      width: min(100%, 390px); height: 460px; border-radius: 14px; overflow: hidden;
+      width: min(100%, var(--stage-w, 390px)); height: 460px; border-radius: 14px; overflow: hidden;
       border: 0.5px solid var(--line); background: var(--panel); position: relative;
       transition: height 200ms ease;
     }
@@ -61,6 +69,7 @@
   </div>
   <div id="stage" data-mode="inline">
     <button id="close" type="button" aria-label="Close fullscreen">Close</button>
+    <div id="overlay" hidden>chat input (simulated)</div>
     <iframe id="widget" title="Orrbi card" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>
   </div>
   <ul id="log" aria-live="polite"></ul>

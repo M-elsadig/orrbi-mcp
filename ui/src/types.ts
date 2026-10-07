@@ -39,6 +39,9 @@ export type Requirement = {
   kind: 'question' | 'notice';
   text: string;
   text_ar?: string | null;
+  /* the condition as a short list item; missing = text */
+  short?: string | null;
+  short_ar?: string | null;
   flag_answer?: boolean;
   flag_note?: string | null;
   flag_note_ar?: string | null;

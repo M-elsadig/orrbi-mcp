@@ -76,8 +76,9 @@ export function registerCreateBooking(server: McpServer) {
         'BEFORE calling this tool you MUST read back to the user, and get their explicit "yes" to, all of: ' +
         'the business name, the service, the date and time (Qatar time, from get_availability start_label), the price as price_label gives it, ' +
         'the customer\'s name, and their Qatar mobile number, and for a 1:1 appointment the trainer. Never call it on a guess or without that confirmation. ' +
-        'If the business has requirements (returned by get_availability / search_businesses, e.g. a health screening), ask the user each one word for word ' +
-        'and pass their answers as requirements: [{id, answer}] (questions: true = yes, false = no; notices: true once they agree). ' +
+        'If the business has requirements (returned by get_availability / search_businesses, e.g. a health screening), list them in one message and ask ' +
+        '"Do any of these apply to you?"; if any do, ask which. Pass every one as requirements: [{id, answer}] ' +
+        '(questions: true = applies, false = does not; notices: true once they agree). ' +
         'Never answer for the user or assume an answer; without every answer the booking is refused. ' +
         'Use business_id/service_id from search_businesses and slot_id from get_availability; never invent ids. ' +
         'Generate a request_id (e.g. a UUID) for each new booking and send the same request_id if you retry, so the booking is not made twice. ' +
@@ -183,7 +184,8 @@ export function registerCreateBooking(server: McpServer) {
         if (answers.reason === 'unknown') return fail(DB_ERRORS.REQUIREMENTS_MISMATCH);
         return fail(`Before booking, ${ctx.business_name ?? 'the business'} needs the user's own answer to: ` +
           answers.missing.map((r) => `"${r.text}"${r.kind === 'notice' ? ' (they must agree)' : ' (yes or no)'}`).join('; ') +
-          '. Ask the user these word for word, never answer for them, then call create_booking again with requirements.');
+          '. List them for the user in one message and ask whether any apply (and which), never answer for them, ' +
+          'then call create_booking again with every requirement in requirements.');
       }
       const flagged: Requirement[] = answers.flagged;
 
